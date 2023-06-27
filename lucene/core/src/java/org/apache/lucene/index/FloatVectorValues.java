@@ -36,7 +36,7 @@ public abstract class FloatVectorValues extends DocIdSetIterator {
   public boolean isMultiValued() {
     return multiValued;
   }
-  
+
   /** Sole constructor */
   protected FloatVectorValues() {}
 
@@ -66,10 +66,11 @@ public abstract class FloatVectorValues extends DocIdSetIterator {
 
   /**
    * Return the document ID corresponding to the input vector id(ordinal)
+   *
    * @param ord vector ID(ordinal)
    * @return the document ID
    */
-  public int ordToDoc(int ord){
+  public int ordToDoc(int ord) {
     return ord;
   }
 }

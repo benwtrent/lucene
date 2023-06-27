@@ -109,24 +109,23 @@ public class HnswGraphSearcher<T> {
    * VectorSimilarityFunction, HnswGraph, Bits, int)}
    */
   public static NeighborQueue search(
-          float[] query,
-          int topK,
-          RandomAccessVectorValues<float[]> vectors,
-          VectorEncoding vectorEncoding,
-          VectorSimilarityFunction similarityFunction,
-          OnHeapHnswGraph graph,
-          Bits acceptOrds,
-          int visitedLimit)
-          throws IOException {
+      float[] query,
+      int topK,
+      RandomAccessVectorValues<float[]> vectors,
+      VectorEncoding vectorEncoding,
+      VectorSimilarityFunction similarityFunction,
+      OnHeapHnswGraph graph,
+      Bits acceptOrds,
+      int visitedLimit)
+      throws IOException {
     OnHeapHnswGraphSearcher<float[]> graphSearcher =
-            new OnHeapHnswGraphSearcher<>(
-                    vectorEncoding,
-                    similarityFunction,
-                    new NeighborQueue(topK, true),
-                    new SparseFixedBitSet(vectors.size()));
+        new OnHeapHnswGraphSearcher<>(
+            vectorEncoding,
+            similarityFunction,
+            new NeighborQueue(topK, true),
+            new SparseFixedBitSet(vectors.size()));
     return search(query, topK, vectors, graph, graphSearcher, acceptOrds, visitedLimit);
   }
-  
 
   /**
    * Searches HNSW graph for the nearest neighbors of a query vector.
@@ -209,7 +208,9 @@ public class HnswGraphSearcher<T> {
     int[] eps = new int[] {initialEp};
     int numVisited = 0;
     for (int level = graph.numLevels() - 1; level >= 1; level--) {
-      results = graphSearcher.searchLevel(query, 1, level, eps, vectors, graph, null, visitedLimit, vectors.isMultiValued());
+      results =
+          graphSearcher.searchLevel(
+              query, 1, level, eps, vectors, graph, null, visitedLimit, vectors.isMultiValued());
       numVisited += results.visitedCount();
       visitedLimit -= results.visitedCount();
       if (results.incomplete()) {
@@ -219,7 +220,8 @@ public class HnswGraphSearcher<T> {
       eps[0] = results.pop();
     }
     results =
-            graphSearcher.searchLevel(query, topK, 0, eps, vectors, graph, acceptOrds, visitedLimit, vectors.isMultiValued());
+        graphSearcher.searchLevel(
+            query, topK, 0, eps, vectors, graph, acceptOrds, visitedLimit, vectors.isMultiValued());
     results.setVisitedCount(results.visitedCount() + numVisited);
     return results;
   }
@@ -251,16 +253,16 @@ public class HnswGraphSearcher<T> {
   }
 
   private NeighborQueue searchLevel(
-          T query,
-          int topK,
-          int level,
-          final int[] entryPoints,
-          RandomAccessVectorValues<T> vectors,
-          HnswGraph graph,
-          Bits acceptOrds,
-          int visitedLimit,
-          boolean multiValued)
-          throws IOException {
+      T query,
+      int topK,
+      int level,
+      final int[] entryPoints,
+      RandomAccessVectorValues<T> vectors,
+      HnswGraph graph,
+      Bits acceptOrds,
+      int visitedLimit,
+      boolean multiValued)
+      throws IOException {
     int size = graph.size();
     NeighborQueue results = new NeighborQueue(topK, false);
     prepareScratchState(vectors.size());
@@ -319,9 +321,12 @@ public class HnswGraphSearcher<T> {
           if (acceptOrds == null || acceptOrds.get(friendVectorId)) {
             boolean nodeInserted = false;
             if (level == 0) {
-              nodeInserted = results.insertWithOverflow(vectors.ordToDoc(friendVectorId), friendSimilarity, multiValued);
+              nodeInserted =
+                  results.insertWithOverflow(
+                      vectors.ordToDoc(friendVectorId), friendSimilarity, multiValued);
             } else {
-              nodeInserted = results.insertWithOverflow(friendVectorId, friendSimilarity, multiValued);
+              nodeInserted =
+                  results.insertWithOverflow(friendVectorId, friendSimilarity, multiValued);
             }
             if (nodeInserted && results.size() >= topK) {
               minAcceptedSimilarity = results.topScore();

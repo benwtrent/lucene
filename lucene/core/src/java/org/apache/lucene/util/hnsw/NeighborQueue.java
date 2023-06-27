@@ -17,10 +17,9 @@
 
 package org.apache.lucene.util.hnsw;
 
+import java.util.HashMap;
 import org.apache.lucene.util.LongHeap;
 import org.apache.lucene.util.NumericUtils;
-
-import java.util.HashMap;
 
 /**
  * NeighborQueue uses a {@link LongHeap} to store lists of arcs in an HNSW graph, represented as a
@@ -56,7 +55,7 @@ public class NeighborQueue {
     return nodeIdToHeapIndex;
   }
 
-  private final HashMap<Integer,Integer> nodeIdToHeapIndex;
+  private final HashMap<Integer, Integer> nodeIdToHeapIndex;
   private final Order order;
 
   // Used to track the number of neighbors visited during a single graph traversal
@@ -86,18 +85,18 @@ public class NeighborQueue {
   public void add(int nodeId, float nodeScore) {
     heap.push(encode(nodeId, nodeScore));
   }
-  
+
   /**
-   * Adds a new graph arc, extending the storage as needed.
-   * This variant is more expensive but it is compatible with a multi-valued scenario.
+   * Adds a new graph arc, extending the storage as needed. This variant is more expensive but it is
+   * compatible with a multi-valued scenario.
    *
    * @param nodeId the neighbor node id
    * @param nodeScore the score of the neighbor, relative to some other node
    */
   public void add(int nodeId, float nodeScore, boolean multiValued) {
     boolean nodeAdded = false;
-    if(!multiValued){
-      this.add(nodeId,nodeScore);
+    if (!multiValued) {
+      this.add(nodeId, nodeScore);
     } else {
       Integer heapIndex = nodeIdToHeapIndex.get(nodeId);
       if (heapIndex == null) {
@@ -111,7 +110,7 @@ public class NeighborQueue {
       this.updateHeapIndexesCache(false, nodeAdded, heapIndex, nodeId);
     }
   }
-  
+
   /**
    * If the heap is not full (size is less than the initialSize provided to the constructor), adds a
    * new node-and-score element. If the heap is full, compares the score against the current top
@@ -124,7 +123,7 @@ public class NeighborQueue {
   public boolean insertWithOverflow(int nodeId, float nodeScore) {
     return (heap.insertWithOverflow(encode(nodeId, nodeScore)) != -1);
   }
-  
+
   /**
    * If the heap is not full (size is less than the initialSize provided to the constructor), adds a
    * new node-and-score element. If the heap is full, compares the score against the current top
@@ -164,21 +163,23 @@ public class NeighborQueue {
 
   /**
    * This can be optimised if heap indexes have not changed, no update would be necessary
+   *
    * @param full
    * @param heapIndex
    * @param nodeId
    */
-  private void updateHeapIndexesCache(boolean full, boolean newNode, Integer heapIndex, int nodeId) {
+  private void updateHeapIndexesCache(
+      boolean full, boolean newNode, Integer heapIndex, int nodeId) {
     if (full || !newNode) {
       for (int i = heapIndex - 1; i > 0; i--) {
         int nodeIdToShift = decodeNodeId(heap.get(i));
         nodeIdToHeapIndex.put(nodeIdToShift, i);
       }
     } else {
-        for (int i = heapIndex + 1; i <= heap.size(); i++) {
-          int nodeIdToShift = decodeNodeId(heap.get(i));
-          nodeIdToHeapIndex.put(nodeIdToShift, i);
-        }
+      for (int i = heapIndex + 1; i <= heap.size(); i++) {
+        int nodeIdToShift = decodeNodeId(heap.get(i));
+        nodeIdToHeapIndex.put(nodeIdToShift, i);
+      }
     }
     nodeIdToHeapIndex.put(nodeId, heapIndex);
   }

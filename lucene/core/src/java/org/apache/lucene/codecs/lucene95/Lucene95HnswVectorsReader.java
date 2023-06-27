@@ -219,7 +219,8 @@ public final class Lucene95HnswVectorsReader extends KnnVectorsReader {
   private boolean readVectorMultiValued(DataInput input) throws IOException {
     byte multiValued = input.readByte();
     if (multiValued < 0 || multiValued > 1) {
-      throw new CorruptIndexException("Invalid boolean for vector multiValued: " + multiValued, input);
+      throw new CorruptIndexException(
+          "Invalid boolean for vector multiValued: " + multiValued, input);
     }
     return multiValued != 0;
   }
@@ -425,8 +426,7 @@ public final class Lucene95HnswVectorsReader extends KnnVectorsReader {
         IndexInput input,
         VectorEncoding vectorEncoding,
         VectorSimilarityFunction similarityFunction,
-        boolean vectorMultiValued
-        )
+        boolean vectorMultiValued)
         throws IOException {
       this.similarityFunction = similarityFunction;
       this.vectorEncoding = vectorEncoding;

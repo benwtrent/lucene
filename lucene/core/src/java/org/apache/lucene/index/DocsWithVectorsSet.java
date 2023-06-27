@@ -16,10 +16,9 @@
  */
 package org.apache.lucene.index;
 
+import java.util.Stack;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.RamUsageEstimator;
-
-import java.util.Stack;
 
 /**
  * Accumulator for documents that have a value for a field. This is optimized for the case that all
@@ -28,7 +27,7 @@ import java.util.Stack;
 public final class DocsWithVectorsSet extends DocsWithFieldSet {
 
   protected static long BASE_RAM_BYTES_USED =
-          RamUsageEstimator.shallowSizeOfInstance(DocsWithVectorsSet.class);
+      RamUsageEstimator.shallowSizeOfInstance(DocsWithVectorsSet.class);
 
   protected Stack<Integer> vectorsPerDocument;
   protected int currentDocVectorsCount;
@@ -52,11 +51,11 @@ public final class DocsWithVectorsSet extends DocsWithFieldSet {
     if (multiValued || docID == lastDocId) {
       if (docID < lastDocId) {
         throw new IllegalArgumentException(
-                "Out of order doc ids: last=" + lastDocId + ", next=" + docID);
+            "Out of order doc ids: last=" + lastDocId + ", next=" + docID);
       }
       if (!multiValued) {
         vectorsPerDocument = new Stack<>();
-        for (int vector = 0; vector < cardinality-1; vector++) {
+        for (int vector = 0; vector < cardinality - 1; vector++) {
           vectorsPerDocument.push(1);
         }
         currentDocVectorsCount = 1;
@@ -69,10 +68,10 @@ public final class DocsWithVectorsSet extends DocsWithFieldSet {
       } else {
         set = FixedBitSet.ensureCapacity(set, docID);
         if (!set.getAndSet(docID)) {
-          cardinality++; //this is the first vector for the docID
+          cardinality++; // this is the first vector for the docID
         }
       }
-      if (docID != lastDocId) {//vector for lastDocId are finished
+      if (docID != lastDocId) { // vector for lastDocId are finished
         vectorsPerDocument.push(currentDocVectorsCount);
         currentDocVectorsCount = 0;
       }
@@ -84,7 +83,6 @@ public final class DocsWithVectorsSet extends DocsWithFieldSet {
     vectorsCount++;
   }
 
-
   /** Return the number of vectors of this set. */
   public int getVectorsCount() {
     return vectorsCount;
@@ -95,7 +93,7 @@ public final class DocsWithVectorsSet extends DocsWithFieldSet {
   }
 
   public int[] getVectorsPerDocument() {
-    if(vectorsPerDocument != null) {
+    if (vectorsPerDocument != null) {
       int[] valuesPerDocumentArray = new int[cardinality];
       if (currentDocVectorsCount != 0) {
         vectorsPerDocument.push(currentDocVectorsCount);

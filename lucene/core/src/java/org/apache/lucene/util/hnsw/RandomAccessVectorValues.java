@@ -26,11 +26,11 @@ import java.io.IOException;
  * @lucene.experimental
  */
 public interface RandomAccessVectorValues<T> {
-  
+
   default boolean isMultiValued() {
     return false;
   }
-  
+
   /** Return the number of vector values */
   int size();
 
@@ -51,7 +51,7 @@ public interface RandomAccessVectorValues<T> {
    */
   RandomAccessVectorValues<T> copy() throws IOException;
 
-  default int ordToDoc(int ord){
+  default int ordToDoc(int ord) {
     return ord;
   }
 }

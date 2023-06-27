@@ -16,18 +16,17 @@
  */
 package org.apache.lucene.search;
 
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
+
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
-
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.util.BitSet;
-
-import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 /**
  * Computes the similarity score between a given query vector and different document vectors. This
@@ -68,9 +67,8 @@ abstract class VectorScorer {
   abstract boolean advanceExact(int doc) throws IOException;
 
   abstract Map<Integer, Float> scoreMultiValued(BitSet acceptedDocs) throws IOException;
-  
-  abstract boolean isMultiValued();
 
+  abstract boolean isMultiValued();
 
   private static class ByteVectorScorer extends VectorScorer {
     private final byte[] query;
@@ -104,8 +102,8 @@ abstract class VectorScorer {
         if (acceptedDocs.get(docID)) {
           float currentScore = similarity.compare(query, values.vectorValue());
           docToScore.putIfAbsent(docID, currentScore);
-          docToScore.computeIfPresent(docID,
-                  (key, previousScore) -> Math.max(previousScore, currentScore));
+          docToScore.computeIfPresent(
+              docID, (key, previousScore) -> Math.max(previousScore, currentScore));
         }
       }
       return docToScore;
@@ -159,8 +157,8 @@ abstract class VectorScorer {
         if (acceptedDocs.get(docID)) {
           float currentScore = similarity.compare(query, values.vectorValue());
           docToScore.putIfAbsent(docID, currentScore);
-          docToScore.computeIfPresent(docID,
-                  (key, previousScore) -> Math.max(previousScore, currentScore));
+          docToScore.computeIfPresent(
+              docID, (key, previousScore) -> Math.max(previousScore, currentScore));
         }
       }
       return docToScore;

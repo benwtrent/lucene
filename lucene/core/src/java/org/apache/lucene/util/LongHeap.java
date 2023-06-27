@@ -78,8 +78,8 @@ public final class LongHeap {
       if (value < heap[1]) {
         return -1;
       }
-      
-      return (int)updateTop(value)[1];
+
+      return (int) updateTop(value)[1];
     }
     return push(value);
   }
@@ -128,12 +128,13 @@ public final class LongHeap {
    * Calling this method on an empty LongHeap has no visible effect.
    *
    * @param value the new element that is less than the current top.
-   * @return the new 'top' element after shuffling the heap, the index where the value has been saved
+   * @return the new 'top' element after shuffling the heap, the index where the value has been
+   *     saved
    */
   public final long[] updateTop(long value) {
     heap[1] = value;
     int valueIndex = downHeap(1);
-    return new long[]{heap[1],valueIndex};
+    return new long[] {heap[1], valueIndex};
   }
 
   /**

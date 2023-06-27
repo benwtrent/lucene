@@ -201,7 +201,7 @@ abstract class AbstractKnnVectorQuery extends Query {
 
   // We allow this to be overridden so that tests can check what search strategy is used
   protected TopDocs exactSearch(LeafReaderContext context, BitSet acceptDocs, long cost)
-          throws IOException {
+      throws IOException {
     FieldInfo fi = context.reader().getFieldInfos().fieldInfo(field);
     if (fi == null || fi.getVectorDimension() == 0) {
       // The field does not exist or does not index vectors
@@ -216,7 +216,8 @@ abstract class AbstractKnnVectorQuery extends Query {
     }
   }
 
-  private TopDocs exactSearchSingleValued(BitSet acceptDocs, long cost, VectorScorer vectorScorer) throws IOException {
+  private TopDocs exactSearchSingleValued(BitSet acceptDocs, long cost, VectorScorer vectorScorer)
+      throws IOException {
     BitSetIterator acceptIterator = new BitSetIterator(acceptDocs, cost);
     HitQueue queue = new HitQueue(k, true);
     ScoreDoc topDoc = queue.top();
@@ -247,12 +248,13 @@ abstract class AbstractKnnVectorQuery extends Query {
     return new TopDocs(totalHits, topScoreDocs);
   }
 
-  private TopDocs exactSearchMultiValued(BitSet acceptedDocs, long cost, VectorScorer vectorScorer) throws IOException {
+  private TopDocs exactSearchMultiValued(BitSet acceptedDocs, long cost, VectorScorer vectorScorer)
+      throws IOException {
     Map<Integer, Float> docToScore = vectorScorer.scoreMultiValued(acceptedDocs);
     HitQueue queue = new HitQueue(k, true);
     ScoreDoc topDoc = queue.top();
 
-    for(int doc:docToScore.keySet()){
+    for (int doc : docToScore.keySet()) {
       float score = docToScore.get(doc);
       if (score > topDoc.score) {
         topDoc.score = score;

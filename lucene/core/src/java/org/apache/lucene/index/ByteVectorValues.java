@@ -66,10 +66,11 @@ public abstract class ByteVectorValues extends DocIdSetIterator {
 
   /**
    * Return the document ID corresponding to the input vector id(ordinal)
+   *
    * @param ord vector ID(ordinal)
    * @return the document ID
    */
-  public int ordToDoc(int ord){
+  public int ordToDoc(int ord) {
     return ord;
   }
 }

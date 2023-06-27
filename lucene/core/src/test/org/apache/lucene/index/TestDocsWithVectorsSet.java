@@ -16,11 +16,10 @@
  */
 package org.apache.lucene.index;
 
+import java.io.IOException;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.tests.util.TestUtil;
-
-import java.io.IOException;
 
 public class TestDocsWithVectorsSet extends LuceneTestCase {
 
@@ -65,18 +64,18 @@ public class TestDocsWithVectorsSet extends LuceneTestCase {
     DocsWithVectorsSet set = new DocsWithVectorsSet();
     int doc1 = random().nextInt(10000);
     int doc1Vectors = 3;
-    for(int i=0; i<doc1Vectors; i++){
-    set.add(doc1);
+    for (int i = 0; i < doc1Vectors; i++) {
+      set.add(doc1);
     }
 
     DocIdSetIterator it = set.iterator();
     assertEquals(doc1, it.nextDoc());
     assertEquals(DocIdSetIterator.NO_MORE_DOCS, it.nextDoc());
     assertEquals(doc1Vectors, set.getVectorsCount());
-    
+
     int doc2 = doc1 + TestUtil.nextInt(random(), 1, 100);
     int doc2Vectors = 5;
-    for(int i=0; i<doc2Vectors; i++){
+    for (int i = 0; i < doc2Vectors; i++) {
       set.add(doc2);
     }
     it = set.iterator();
@@ -84,7 +83,7 @@ public class TestDocsWithVectorsSet extends LuceneTestCase {
     assertEquals(doc2, it.nextDoc());
     assertEquals(DocIdSetIterator.NO_MORE_DOCS, it.nextDoc());
     assertEquals(doc1Vectors + doc2Vectors, set.getVectorsCount());
-    
+
     int[] valuesPerDocument = set.getVectorsPerDocument();
     assertEquals(doc1Vectors, valuesPerDocument[0]);
     assertEquals(doc2Vectors, valuesPerDocument[1]);
@@ -115,7 +114,7 @@ public class TestDocsWithVectorsSet extends LuceneTestCase {
     }
     int doc1 = denseCount + random().nextInt(10000);
     int doc1Vectors = 3;
-    for(int i=0; i<doc1Vectors; i++){
+    for (int i = 0; i < doc1Vectors; i++) {
       set.add(doc1);
     }
 
@@ -129,7 +128,7 @@ public class TestDocsWithVectorsSet extends LuceneTestCase {
 
     int doc2 = doc1 + TestUtil.nextInt(random(), 1, 100);
     int doc2Vectors = 5;
-    for(int i=0; i<doc2Vectors; i++){
+    for (int i = 0; i < doc2Vectors; i++) {
       set.add(doc2);
     }
     it = set.iterator();
@@ -142,11 +141,10 @@ public class TestDocsWithVectorsSet extends LuceneTestCase {
     assertEquals(denseCount + doc1Vectors + doc2Vectors, set.getVectorsCount());
 
     int[] valuesPerDocument = set.getVectorsPerDocument();
-    for(int i=0; i<denseCount;i++){
+    for (int i = 0; i < denseCount; i++) {
       assertEquals(1, valuesPerDocument[i]);
-
     }
     assertEquals(doc1Vectors, valuesPerDocument[denseCount]);
-    assertEquals(doc2Vectors, valuesPerDocument[denseCount+1]);
+    assertEquals(doc2Vectors, valuesPerDocument[denseCount + 1]);
   }
 }

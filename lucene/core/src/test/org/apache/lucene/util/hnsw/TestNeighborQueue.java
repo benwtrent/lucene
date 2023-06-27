@@ -17,9 +17,8 @@
 
 package org.apache.lucene.util.hnsw;
 
-import org.apache.lucene.tests.util.LuceneTestCase;
-
 import java.util.HashMap;
+import org.apache.lucene.tests.util.LuceneTestCase;
 
 public class TestNeighborQueue extends LuceneTestCase {
 
@@ -122,16 +121,16 @@ public class TestNeighborQueue extends LuceneTestCase {
     for (int i = 1; i < 4; i++) {
       for (int j = 0; j < i; j++) {
         float score = 0.2f;
-        //node 2 has max score
-        if(i==2 && j==0){
+        // node 2 has max score
+        if (i == 2 && j == 0) {
           score = 0.9f;
         }
-        nn.insertWithOverflow(i, score * (j+1), false);
+        nn.insertWithOverflow(i, score * (j + 1), false);
       }
     }
 
     HashMap<Integer, Integer> nodeIdToHeapIndex = nn.getNodeIdToHeapIndex();
-    assertEquals(3,nodeIdToHeapIndex.size());
+    assertEquals(3, nodeIdToHeapIndex.size());
     assertEquals(1l, nn.pop());
     assertEquals(3l, nn.pop());
     assertEquals(2l, nn.pop());
@@ -143,20 +142,20 @@ public class TestNeighborQueue extends LuceneTestCase {
     for (int i = 1; i < 6; i++) {
       for (int j = 0; j < i; j++) {
         float score = 0.1f;
-        //node 2 has max score
-        if(i==2 && j==0){
+        // node 2 has max score
+        if (i == 2 && j == 0) {
           score = 0.9f;
         }
 
-        if(i==4 && j==0){
+        if (i == 4 && j == 0) {
           score = 0.8f;
         }
-        nn.insertWithOverflow(i, score * (j+1), false);
+        nn.insertWithOverflow(i, score * (j + 1), false);
       }
     }
 
     HashMap<Integer, Integer> nodeIdToHeapIndex = nn.getNodeIdToHeapIndex();
-    assertEquals(3,nodeIdToHeapIndex.size());
+    assertEquals(3, nodeIdToHeapIndex.size());
     assertEquals(5l, nn.pop());
     assertEquals(4l, nn.pop());
     assertEquals(2l, nn.pop());
