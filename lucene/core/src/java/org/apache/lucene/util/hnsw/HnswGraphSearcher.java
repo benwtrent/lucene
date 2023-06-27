@@ -205,12 +205,12 @@ public class HnswGraphSearcher<T> {
       return new NeighborQueue(1, true);
     }
     NeighborQueue results;
-    int[] eps = new int[] {initialEp};
+    results = new NeighborQueue(1, false);
+    int[] eps = new int[] {graph.entryNode()};
     int numVisited = 0;
     for (int level = graph.numLevels() - 1; level >= 1; level--) {
-      results =
-          graphSearcher.searchLevel(
-              query, 1, level, eps, vectors, graph, null, visitedLimit, vectors.isMultiValued());
+      results.clear();
+      graphSearcher.searchLevel(results, query, 1, level, eps, vectors, graph, null, visitedLimit, vectors.isMultiValued());
       numVisited += results.visitedCount();
       visitedLimit -= results.visitedCount();
       if (results.incomplete()) {
@@ -219,9 +219,9 @@ public class HnswGraphSearcher<T> {
       }
       eps[0] = results.pop();
     }
-    results =
-        graphSearcher.searchLevel(
-            query, topK, 0, eps, vectors, graph, acceptOrds, visitedLimit, vectors.isMultiValued());
+    results = new NeighborQueue(topK, false);
+    graphSearcher.searchLevel(
+        results, query, topK, 0, eps, vectors, graph, acceptOrds, visitedLimit, vectors.isMultiValued());
     results.setVisitedCount(results.visitedCount() + numVisited);
     return results;
   }
@@ -249,10 +249,19 @@ public class HnswGraphSearcher<T> {
       RandomAccessVectorValues<T> vectors,
       HnswGraph graph)
       throws IOException {
-    return searchLevel(query, topK, level, eps, vectors, graph, null, Integer.MAX_VALUE, false);
+    NeighborQueue results = new NeighborQueue(topK, false);
+    searchLevel(results, query, topK, level, eps, vectors, graph, null, Integer.MAX_VALUE, false);
+    return results;
   }
 
-  private NeighborQueue searchLevel(
+  /**
+   * Add the closest neighbors found to a priority queue (heap). These are returned in REVERSE
+   * proximity order -- the most distant neighbor of the topK found, i.e. the one with the lowest
+   * score/comparison value, will be at the top of the heap, while the closest neighbor will be the
+   * last to be popped.
+   */
+  void searchLevel(
+      NeighborQueue results,
       T query,
       int topK,
       int level,
@@ -263,8 +272,9 @@ public class HnswGraphSearcher<T> {
       int visitedLimit,
       boolean multiValued)
       throws IOException {
+    assert results.isMinHeap();
+
     int size = graph.size();
-    NeighborQueue results = new NeighborQueue(topK, false);
     prepareScratchState(vectors.size());
 
     int vectorIdsVisited = 0;
@@ -339,7 +349,6 @@ public class HnswGraphSearcher<T> {
       results.pop();
     }
     results.setVisitedCount(vectorIdsVisited);
-    return results;
   }
 
   private float compare(T query, RandomAccessVectorValues<T> vectors, int ord) throws IOException {
@@ -355,7 +364,7 @@ public class HnswGraphSearcher<T> {
     if (visited.length() < capacity) {
       visited = FixedBitSet.ensureCapacity((FixedBitSet) visited, capacity);
     }
-    visited.clear(0, visited.length());
+    visited.clear();
   }
 
   /**
@@ -381,10 +390,12 @@ public class HnswGraphSearcher<T> {
   }
 
   /**
-   * This class allow {@link OnHeapHnswGraph} to be searched in a thread-safe manner.
+   * This class allows {@link OnHeapHnswGraph} to be searched in a thread-safe manner by avoiding
+   * the unsafe methods (seek and nextNeighbor, which maintain state in the graph object) and
+   * instead maintaining the state in the searcher object.
    *
-   * <p>Note the class itself is NOT thread safe, but since each search will create one new graph
-   * searcher the search method is thread safe.
+   * <p>Note the class itself is NOT thread safe, but since each search will create a new Searcher,
+   * the search methods using this class are thread safe.
    */
   private static class OnHeapHnswGraphSearcher<C> extends HnswGraphSearcher<C> {
 
