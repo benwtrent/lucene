@@ -275,16 +275,18 @@ public final class HnswGraphBuilder<T> {
     NeighborQueue candidates = entryCandidates;
     for (int level = curMaxLevel; level > nodeLevel; level--) {
       candidates.clear();
+      //TODO how do we know if its multi-value or not for the searcher???
       graphSearcher.searchLevel(
-          candidates, value, 1, level, eps, vectors, hnsw, null, Integer.MAX_VALUE);
+          candidates, value, 1, level, eps, vectors, hnsw, null, Integer.MAX_VALUE, false);
       eps = new int[] {candidates.pop()};
     }
     // for levels <= nodeLevel search with topk = beamWidth, and add connections
     candidates = beamCandidates;
     for (int level = Math.min(nodeLevel, curMaxLevel); level >= 0; level--) {
       candidates.clear();
+      //TODO how do we know if its multi-value or not for the searcher???
       graphSearcher.searchLevel(
-          candidates, value, beamWidth, level, eps, vectors, hnsw, null, Integer.MAX_VALUE);
+          candidates, value, beamWidth, level, eps, vectors, hnsw, null, Integer.MAX_VALUE, false);
       eps = candidates.nodes();
       hnsw.addNode(level, node);
       addDiverseNeighbors(level, node, candidates);

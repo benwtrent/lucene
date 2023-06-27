@@ -69,6 +69,7 @@ abstract class OffHeapByteVectorValues extends ByteVectorValues
     slice.readBytes(byteBuffer.array(), byteBuffer.arrayOffset(), byteSize);
   }
 
+  @Override
   public abstract int ordToDoc(int ord);
 
   static OffHeapByteVectorValues load(
