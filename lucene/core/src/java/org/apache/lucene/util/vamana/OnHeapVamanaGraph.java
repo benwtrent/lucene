@@ -39,13 +39,13 @@ public final class OnHeapVamanaGraph extends VamanaGraph implements Accountable 
 
   private NeighborArray[] graph;
   private final AtomicInteger size =
-    new AtomicInteger(0); // graph size, which is number of nodes in level 0
+      new AtomicInteger(0); // graph size, which is number of nodes in level 0
 
   // is only used to account memory usage
   private final AtomicInteger maxNodeId = new AtomicInteger(-1);
   private final int nsize0; // neighbour array size at zero level
   private final boolean
-    noGrowth; // if an initial size is passed in, we don't expect the graph to grow itself
+      noGrowth; // if an initial size is passed in, we don't expect the graph to grow itself
 
   // KnnGraphValues iterator members
   private int upto;
@@ -114,7 +114,7 @@ public final class OnHeapVamanaGraph extends VamanaGraph implements Accountable 
     if (node >= graph.length) {
       if (noGrowth) {
         throw new IllegalStateException(
-          "The graph does not expect to grow when an initial size is given");
+            "The graph does not expect to grow when an initial size is given");
       }
       graph = ArrayUtil.grow(graph, node + 1);
     }
@@ -184,7 +184,7 @@ public final class OnHeapVamanaGraph extends VamanaGraph implements Accountable 
   public NodesIterator getNodes() {
     if (size() != maxNodeId() + 1) {
       throw new IllegalStateException(
-        "graph build not complete, size=" + size() + " maxNodeId=" + maxNodeId());
+          "graph build not complete, size=" + size() + " maxNodeId=" + maxNodeId());
     }
 
     return new ArrayNodesIterator(size());
@@ -193,20 +193,20 @@ public final class OnHeapVamanaGraph extends VamanaGraph implements Accountable 
   @Override
   public long ramBytesUsed() {
     long neighborArrayBytes0 =
-      (long) nsize0 * (Integer.BYTES + Float.BYTES)
-        + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER * 2L
-        + RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L
-        + Integer.BYTES * 3;
+        (long) nsize0 * (Integer.BYTES + Float.BYTES)
+            + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER * 2L
+            + RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L
+            + Integer.BYTES * 3;
     long total = 0;
     total +=
-      size() * (neighborArrayBytes0 + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER)
-        + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER; // for graph and level 0;
+        size() * (neighborArrayBytes0 + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER)
+            + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER; // for graph and level 0;
     total += 2 * Integer.BYTES; // all int fields
     total += 1; // field: noGrowth
     total +=
-      RamUsageEstimator.NUM_BYTES_OBJECT_REF
-        + RamUsageEstimator.NUM_BYTES_OBJECT_HEADER
-        + 2 * Integer.BYTES; // field: entryNode
+        RamUsageEstimator.NUM_BYTES_OBJECT_REF
+            + RamUsageEstimator.NUM_BYTES_OBJECT_HEADER
+            + 2 * Integer.BYTES; // field: entryNode
     total += 2L * (Integer.BYTES + RamUsageEstimator.NUM_BYTES_OBJECT_HEADER); // 2 AtomicInteger
     total += RamUsageEstimator.NUM_BYTES_OBJECT_REF; // field: cur
 

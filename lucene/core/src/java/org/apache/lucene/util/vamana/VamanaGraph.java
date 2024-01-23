@@ -1,6 +1,6 @@
 package org.apache.lucene.util.vamana;
 
-import org.apache.lucene.index.FloatVectorValues;
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -8,8 +8,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
-
-import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
+import org.apache.lucene.index.FloatVectorValues;
 
 public abstract class VamanaGraph {
   /** Sole constructor */
@@ -55,36 +54,36 @@ public abstract class VamanaGraph {
 
   /** Empty graph value */
   public static VamanaGraph EMPTY =
-    new VamanaGraph() {
+      new VamanaGraph() {
 
-      @Override
-      public int nextNeighbor() {
-        return NO_MORE_DOCS;
-      }
+        @Override
+        public int nextNeighbor() {
+          return NO_MORE_DOCS;
+        }
 
-      @Override
-      public void seek(int target) {}
+        @Override
+        public void seek(int target) {}
 
-      @Override
-      public int size() {
-        return 0;
-      }
+        @Override
+        public int size() {
+          return 0;
+        }
 
-      @Override
-      public int entryNode() {
-        return 0;
-      }
+        @Override
+        public int entryNode() {
+          return 0;
+        }
 
-      @Override
-      public NodesIterator getNeighbors() {
-        return ArrayNodesIterator.EMPTY;
-      }
+        @Override
+        public NodesIterator getNeighbors() {
+          return ArrayNodesIterator.EMPTY;
+        }
 
-      @Override
-      public NodesIterator getNodes() {
-        return ArrayNodesIterator.EMPTY;
-      }
-    };
+        @Override
+        public NodesIterator getNodes() {
+          return ArrayNodesIterator.EMPTY;
+        }
+      };
 
   /**
    * Iterator over the graph nodes on a certain level, Iterator also provides the size – the total

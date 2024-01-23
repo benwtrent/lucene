@@ -1,8 +1,7 @@
 package org.apache.lucene.util.vamana;
 
-import org.apache.lucene.util.InfoStream;
-
 import java.io.IOException;
+import org.apache.lucene.util.InfoStream;
 
 public interface VamanaBuilder {
   /**

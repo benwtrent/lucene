@@ -1,19 +1,18 @@
 package org.apache.lucene.util.vamana;
 
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
+
+import java.io.IOException;
+import java.util.Map;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.TopKnnCollector;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.SparseFixedBitSet;
-import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.hnsw.NeighborArray;
+import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
-
-import java.io.IOException;
-import java.util.Map;
-
-import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 public class VamanaGraphSearcher {
 
@@ -40,7 +39,7 @@ public class VamanaGraphSearcher {
   }
 
   public VamanaGraphSearcher(
-    NeighborQueue candidates, BitSet visited, Map<Integer, CachedNode> cache) {
+      NeighborQueue candidates, BitSet visited, Map<Integer, CachedNode> cache) {
     this.candidates = candidates;
     this.visited = visited;
     this.cache = cache;
@@ -57,17 +56,17 @@ public class VamanaGraphSearcher {
    *     {@code null} if they are all allowed to match.
    */
   public static void search(
-    RandomVectorScorer scorer,
-    KnnCollector knnCollector,
-    VamanaGraph graph,
-    Bits acceptOrds,
-    Map<Integer, CachedNode> cache)
-    throws IOException {
+      RandomVectorScorer scorer,
+      KnnCollector knnCollector,
+      VamanaGraph graph,
+      Bits acceptOrds,
+      Map<Integer, CachedNode> cache)
+      throws IOException {
     VamanaGraphSearcher graphSearcher =
-      new VamanaGraphSearcher(
-        new NeighborQueue(knnCollector.k(), true),
-        new SparseFixedBitSet(getGraphSize(graph)),
-        cache);
+        new VamanaGraphSearcher(
+            new NeighborQueue(knnCollector.k(), true),
+            new SparseFixedBitSet(getGraphSize(graph)),
+            cache);
     search(scorer, knnCollector, graph, graphSearcher, acceptOrds);
   }
 
@@ -84,27 +83,27 @@ public class VamanaGraphSearcher {
    * @return a set of collected vectors holding the nearest neighbors found
    */
   public static KnnCollector search(
-    RandomVectorScorer scorer,
-    int topK,
-    OnHeapVamanaGraph graph,
-    Bits acceptOrds,
-    int visitedLimit)
-    throws IOException {
+      RandomVectorScorer scorer,
+      int topK,
+      OnHeapVamanaGraph graph,
+      Bits acceptOrds,
+      int visitedLimit)
+      throws IOException {
     KnnCollector knnCollector = new TopKnnCollector(topK, visitedLimit);
     OnHeapVamanaGraphSearcher graphSearcher =
-      new OnHeapVamanaGraphSearcher(
-        new NeighborQueue(topK, true), new SparseFixedBitSet(getGraphSize(graph)));
+        new OnHeapVamanaGraphSearcher(
+            new NeighborQueue(topK, true), new SparseFixedBitSet(getGraphSize(graph)));
     search(scorer, knnCollector, graph, graphSearcher, acceptOrds);
     return knnCollector;
   }
 
   private static void search(
-    RandomVectorScorer scorer,
-    KnnCollector knnCollector,
-    VamanaGraph graph,
-    VamanaGraphSearcher graphSearcher,
-    Bits acceptOrds)
-    throws IOException {
+      RandomVectorScorer scorer,
+      KnnCollector knnCollector,
+      VamanaGraph graph,
+      VamanaGraphSearcher graphSearcher,
+      Bits acceptOrds)
+      throws IOException {
     int initialEp = graph.entryNode();
     if (initialEp == -1) {
       return;
@@ -120,12 +119,12 @@ public class VamanaGraphSearcher {
    * last to be popped.
    */
   void search(
-    KnnCollector results,
-    RandomVectorScorer scorer,
-    final int[] eps,
-    VamanaGraph graph,
-    Bits acceptOrds)
-    throws IOException {
+      KnnCollector results,
+      RandomVectorScorer scorer,
+      final int[] eps,
+      VamanaGraph graph,
+      Bits acceptOrds)
+      throws IOException {
 
     int size = getGraphSize(graph);
 
@@ -148,8 +147,8 @@ public class VamanaGraphSearcher {
   }
 
   private void sequentialSearch(
-    KnnCollector results, RandomVectorScorer scorer, VamanaGraph graph, Bits acceptOrds, int size)
-    throws IOException {
+      KnnCollector results, RandomVectorScorer scorer, VamanaGraph graph, Bits acceptOrds, int size)
+      throws IOException {
     float minAcceptedSimilarity = results.minCompetitiveSimilarity();
     while (candidates.size() > 0 && results.earlyTerminated() == false) {
       // get the best candidate (closest or best scoring)
@@ -204,7 +203,7 @@ public class VamanaGraphSearcher {
   }
 
   VamanaGraph.NodesIterator getNeighbors(KnnCollector results, VamanaGraph graph, int targetNode)
-    throws IOException {
+      throws IOException {
     if (cache == null || !cache.containsKey(targetNode)) {
       // Not using the cache, so need to seek in the graph (IO happens here).
       graph.seek(targetNode);
@@ -262,5 +261,4 @@ public class VamanaGraphSearcher {
       return NO_MORE_DOCS;
     }
   }
-
 }

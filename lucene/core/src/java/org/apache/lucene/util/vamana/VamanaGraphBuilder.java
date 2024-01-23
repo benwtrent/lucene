@@ -1,17 +1,5 @@
 package org.apache.lucene.util.vamana;
 
-import org.apache.lucene.search.DocIdSetIterator;
-import org.apache.lucene.search.KnnCollector;
-import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.util.BitSet;
-import org.apache.lucene.util.Bits;
-import org.apache.lucene.util.FixedBitSet;
-import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.hnsw.NeighborArray;
-import org.apache.lucene.util.hnsw.NeighborQueue;
-import org.apache.lucene.util.hnsw.RandomVectorScorer;
-import org.apache.lucene.util.hnsw.RandomVectorScorerSupplier;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,6 +7,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.KnnCollector;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.util.BitSet;
+import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.InfoStream;
+import org.apache.lucene.util.hnsw.NeighborArray;
+import org.apache.lucene.util.hnsw.NeighborQueue;
+import org.apache.lucene.util.hnsw.RandomVectorScorer;
+import org.apache.lucene.util.hnsw.RandomVectorScorerSupplier;
 
 public class VamanaGraphBuilder implements VamanaBuilder {
   /** Default number of maximum connections per node */
@@ -40,21 +38,21 @@ public class VamanaGraphBuilder implements VamanaBuilder {
   private final RandomVectorScorerSupplier scorerSupplier;
   private final VamanaGraphSearcher graphSearcher;
   private final GraphBuilderKnnCollector
-    beamCandidates; // for levels of graph where we add the node
+      beamCandidates; // for levels of graph where we add the node
 
   protected final OnHeapVamanaGraph vamana;
 
   private InfoStream infoStream = InfoStream.getDefault();
 
   public static VamanaGraphBuilder create(
-    RandomVectorScorerSupplier scorerSupplier, int M, int beamWidth, float alpha)
-    throws IOException {
+      RandomVectorScorerSupplier scorerSupplier, int M, int beamWidth, float alpha)
+      throws IOException {
     return new VamanaGraphBuilder(scorerSupplier, M, beamWidth, alpha, -1);
   }
 
   public static VamanaGraphBuilder create(
-    RandomVectorScorerSupplier scorerSupplier, int M, int beamWidth, float alpha, int graphSize)
-    throws IOException {
+      RandomVectorScorerSupplier scorerSupplier, int M, int beamWidth, float alpha, int graphSize)
+      throws IOException {
     return new VamanaGraphBuilder(scorerSupplier, M, beamWidth, alpha, graphSize);
   }
 
@@ -69,26 +67,26 @@ public class VamanaGraphBuilder implements VamanaBuilder {
    * @param graphSize size of graph, if unknown, pass in -1
    */
   protected VamanaGraphBuilder(
-    RandomVectorScorerSupplier scorerSupplier, int M, int beamWidth, float alpha, int graphSize)
-    throws IOException {
+      RandomVectorScorerSupplier scorerSupplier, int M, int beamWidth, float alpha, int graphSize)
+      throws IOException {
     this(scorerSupplier, M, beamWidth, alpha, new OnHeapVamanaGraph(M, graphSize));
   }
 
   protected VamanaGraphBuilder(
-    RandomVectorScorerSupplier scorerSupplier,
-    int M,
-    int beamWidth,
-    float alpha,
-    OnHeapVamanaGraph vamana)
-    throws IOException {
+      RandomVectorScorerSupplier scorerSupplier,
+      int M,
+      int beamWidth,
+      float alpha,
+      OnHeapVamanaGraph vamana)
+      throws IOException {
     this(
-      scorerSupplier,
-      M,
-      beamWidth,
-      alpha,
-      vamana,
-      new VamanaGraphSearcher(
-        new NeighborQueue(beamWidth, true), new FixedBitSet(vamana.size())));
+        scorerSupplier,
+        M,
+        beamWidth,
+        alpha,
+        vamana,
+        new VamanaGraphSearcher(
+            new NeighborQueue(beamWidth, true), new FixedBitSet(vamana.size())));
   }
 
   /**
@@ -102,13 +100,13 @@ public class VamanaGraphBuilder implements VamanaBuilder {
    * @param vamana the graph to build, can be previously initialized
    */
   protected VamanaGraphBuilder(
-    RandomVectorScorerSupplier scorerSupplier,
-    int M,
-    int beamWidth,
-    float alpha,
-    OnHeapVamanaGraph vamana,
-    VamanaGraphSearcher graphSearcher)
-    throws IOException {
+      RandomVectorScorerSupplier scorerSupplier,
+      int M,
+      int beamWidth,
+      float alpha,
+      OnHeapVamanaGraph vamana,
+      VamanaGraphSearcher graphSearcher)
+      throws IOException {
     if (M <= 0) {
       throw new IllegalArgumentException("maxConn must be positive");
     }
@@ -118,7 +116,7 @@ public class VamanaGraphBuilder implements VamanaBuilder {
     this.M = M;
     this.alpha = alpha;
     this.scorerSupplier =
-      Objects.requireNonNull(scorerSupplier, "scorer supplier must not be null");
+        Objects.requireNonNull(scorerSupplier, "scorer supplier must not be null");
     this.vamana = vamana;
     this.graphSearcher = graphSearcher;
     beamCandidates = new GraphBuilderKnnCollector(beamWidth);
@@ -303,13 +301,13 @@ public class VamanaGraphBuilder implements VamanaBuilder {
   private long printGraphBuildStatus(int node, long start, long t) {
     long now = System.nanoTime();
     infoStream.message(
-      VAMANA_COMPONENT,
-      String.format(
-        Locale.ROOT,
-        "built %d in %d/%d ms",
-        node,
-        TimeUnit.NANOSECONDS.toMillis(now - t),
-        TimeUnit.NANOSECONDS.toMillis(now - start)));
+        VAMANA_COMPONENT,
+        String.format(
+            Locale.ROOT,
+            "built %d in %d/%d ms",
+            node,
+            TimeUnit.NANOSECONDS.toMillis(now - t),
+            TimeUnit.NANOSECONDS.toMillis(now - start)));
     return now;
   }
 
@@ -411,13 +409,13 @@ public class VamanaGraphBuilder implements VamanaBuilder {
    * @return whether the candidate is diverse given the existing neighbors
    */
   private boolean diversityCheck(
-    int candidate, float score, NeighborArray neighbors, BitSet selected, float a)
-    throws IOException {
+      int candidate, float score, NeighborArray neighbors, BitSet selected, float a)
+      throws IOException {
     RandomVectorScorer scorer = scorerSupplier.scorer(candidate);
 
     for (int i = selected.nextSetBit(0);
-         i != DocIdSetIterator.NO_MORE_DOCS;
-         i = selected.nextSetBit(i + 1)) {
+        i != DocIdSetIterator.NO_MORE_DOCS;
+        i = selected.nextSetBit(i + 1)) {
       int otherNode = neighbors.nodes[i];
       if (otherNode == candidate) {
         return false;

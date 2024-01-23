@@ -17,10 +17,17 @@
 
 package org.apache.lucene.codecs.lucene99;
 
+import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readSimilarityFunction;
+import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readVectorEncoding;
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.FlatVectorsReader;
 import org.apache.lucene.codecs.KnnVectorsReader;
-import org.apache.lucene.codecs.lucene95.OrdToDocDISIReaderConfiguration;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.FieldInfo;
@@ -39,33 +46,23 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.ScalarQuantizer;
-import org.apache.lucene.util.hnsw.HnswGraph;
 import org.apache.lucene.util.hnsw.OrdinalTranslatedKnnCollector;
 import org.apache.lucene.util.hnsw.RandomVectorScorer;
-import org.apache.lucene.util.vamana.VamanaGraph;
 import org.apache.lucene.util.packed.DirectMonotonicReader;
+import org.apache.lucene.util.vamana.VamanaGraph;
 import org.apache.lucene.util.vamana.VamanaGraphSearcher;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.HashMap;
-import java.util.Map;
-
-import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readSimilarityFunction;
-import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readVectorEncoding;
-import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 /**
  * Reads vectors from the index segments along with index data structures supporting KNN search.
  *
  * @lucene.experimental
  */
-public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
+public final class Lucene99VamanaVectorsReader extends KnnVectorsReader
+    implements QuantizedVectorsReader {
 
   private static final long SHALLOW_SIZE =
       RamUsageEstimator.shallowSizeOfInstance(Lucene99VamanaVectorsFormat.class);
 
-  private final FieldInfos fieldInfos;
   private final Map<String, FieldEntry> fields = new HashMap<>();
   private final IndexInput vectorIndex;
   private final FlatVectorsReader flatVectorsReader;
@@ -74,10 +71,11 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
       throws IOException {
     this.flatVectorsReader = flatVectorsReader;
     boolean success = false;
-    this.fieldInfos = state.fieldInfos;
     String metaFileName =
         IndexFileNames.segmentFileName(
-            state.segmentInfo.name, state.segmentSuffix, Lucene99VamanaVectorsFormat.META_EXTENSION);
+            state.segmentInfo.name,
+            state.segmentSuffix,
+            Lucene99VamanaVectorsFormat.META_EXTENSION);
     int versionMeta = -1;
     try (ChecksumIndexInput meta = state.directory.openChecksumInput(metaFileName)) {
       Throwable priorE = null;
@@ -201,6 +199,18 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     return flatVectorsReader.getByteVectorValues(field);
   }
 
+  @Override
+  public QuantizedByteVectorValues getQuantizedVectorValues(String fieldName) throws IOException {
+    // TODO how can we iterate the quantized values in order?
+    //  Can we do this from within the InGraph iterators?
+    return null;
+  }
+
+  @Override
+  public ScalarQuantizer getQuantizationState(String fieldName) {
+    return fields.get(fieldName).scalarQuantizer;
+  }
+
   VamanaGraph getGraph(FieldEntry fieldEntry) throws IOException {
     return new OffHeapVamanaGraph(fieldEntry, vectorIndex);
   }
@@ -211,17 +221,16 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     FieldEntry fieldEntry = fields.get(field);
 
     if (fieldEntry.size() == 0
-      || knnCollector.k() == 0
-      || fieldEntry.vectorEncoding != VectorEncoding.FLOAT32) {
+        || knnCollector.k() == 0
+        || fieldEntry.vectorEncoding != VectorEncoding.FLOAT32) {
       return;
     }
-    if (fieldEntry.isQuantized) {
-      InGraphOffHeapQuantizedByteVectorValues vectorValues =
+    InGraphOffHeapQuantizedByteVectorValues vectorValues =
         InGraphOffHeapQuantizedByteVectorValues.load(fieldEntry, vectorIndex);
-      RandomVectorScorer scorer =
+    RandomVectorScorer scorer =
         new ScalarQuantizedRandomVectorScorer(
-          fieldEntry.similarityFunction, fieldEntry.scalarQuantizer, vectorValues, target);
-      VamanaGraphSearcher.search(
+            fieldEntry.similarityFunction, fieldEntry.scalarQuantizer, vectorValues, target);
+    VamanaGraphSearcher.search(
         scorer,
         new OrdinalTranslatedKnnCollector(knnCollector, vectorValues::ordToDoc),
         getGraph(fieldEntry),
@@ -229,20 +238,6 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
         //          vectorValues.getAcceptOrds(acceptDocs));
         acceptDocs,
         null);
-    } else {
-      //TODO collate the scorrer and vector iterator
-      KnnCollector collector =
-        new OrdinalTranslatedKnnCollector(knnCollector, vectorValues::ordToDoc);
-      Map<Integer, float[]> cached = new HashMap<>();
-      VamanaGraphSearcher.search(
-        scorer,
-        collector,
-        getGraph(fieldEntry),
-        // FIXME: support filtered
-        //          vectorValues.getAcceptOrds(acceptDocs));
-        acceptDocs,
-        this.nodeCaches.get(field));
-    }
   }
 
   @Override
@@ -259,7 +254,7 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
   public static class FieldEntry implements Accountable {
 
     private static final long SHALLOW_SIZE =
-      RamUsageEstimator.shallowSizeOfInstance(FieldEntry.class);
+        RamUsageEstimator.shallowSizeOfInstance(FieldEntry.class);
     final VectorSimilarityFunction similarityFunction;
     final VectorEncoding vectorEncoding;
     final long vectorIndexOffset;
@@ -272,35 +267,30 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     final long offsetsOffset;
     final int offsetsBlockShift;
     final long offsetsLength;
-    final OrdToDocDISIReaderConfiguration ordToDoc;
-    final float configuredQuantile, lowerQuantile, upperQuantile;
+    final float lowerQuantile, upperQuantile;
     final ScalarQuantizer scalarQuantizer;
 
     final boolean isQuantized;
 
     FieldEntry(
-      IndexInput meta, VectorEncoding vectorEncoding, VectorSimilarityFunction similarityFunction)
-      throws IOException {
+        IndexInput meta, VectorEncoding vectorEncoding, VectorSimilarityFunction similarityFunction)
+        throws IOException {
       this.similarityFunction = similarityFunction;
       this.vectorEncoding = vectorEncoding;
       this.isQuantized = meta.readByte() == 1;
+      assert this.isQuantized;
       // Has int8 quantization
-      if (isQuantized) {
-        configuredQuantile = Float.intBitsToFloat(meta.readInt());
-        lowerQuantile = Float.intBitsToFloat(meta.readInt());
-        upperQuantile = Float.intBitsToFloat(meta.readInt());
-        scalarQuantizer = new ScalarQuantizer(lowerQuantile, upperQuantile, configuredQuantile);
-      } else {
-        configuredQuantile = -1;
-        lowerQuantile = -1;
-        upperQuantile = -1;
-        scalarQuantizer = null;
-      }
+      lowerQuantile = Float.intBitsToFloat(meta.readInt());
+      upperQuantile = Float.intBitsToFloat(meta.readInt());
       vectorIndexOffset = meta.readVLong();
       vectorIndexLength = meta.readVLong();
       dimension = meta.readVInt();
+      scalarQuantizer =
+          new ScalarQuantizer(
+              lowerQuantile,
+              upperQuantile,
+              Lucene99ScalarQuantizedVectorsFormat.calculateDefaultConfidenceInterval(dimension));
       size = meta.readInt();
-      ordToDoc = OrdToDocDISIReaderConfiguration.fromStoredMeta(meta, size);
 
       // read node offsets
       M = meta.readVInt();
@@ -322,11 +312,10 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     int size() {
       return size;
     }
+
     @Override
     public long ramBytesUsed() {
-      return SHALLOW_SIZE
-        + RamUsageEstimator.sizeOf(ordToDoc)
-        + RamUsageEstimator.sizeOf(offsetsMeta);
+      return SHALLOW_SIZE + RamUsageEstimator.sizeOf(offsetsMeta);
     }
   }
 
@@ -351,7 +340,7 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
 
     OffHeapVamanaGraph(FieldEntry entry, IndexInput vectorIndex) throws IOException {
       this.dataIn =
-        vectorIndex.slice("graph-data", entry.vectorIndexOffset, entry.vectorIndexLength);
+          vectorIndex.slice("graph-data", entry.vectorIndexOffset, entry.vectorIndexLength);
       this.indexOffset = entry.vectorIndexOffset;
       this.indexLength = entry.vectorIndexLength;
       this.entryNode = entry.entryNode;
@@ -359,7 +348,7 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
       this.dimensions = entry.dimension;
       this.encoding = entry.vectorEncoding;
       final RandomAccessInput addressesData =
-        vectorIndex.randomAccessSlice(entry.offsetsOffset, entry.offsetsLength);
+          vectorIndex.randomAccessSlice(entry.offsetsOffset, entry.offsetsLength);
       this.graphNodeOffsets = DirectMonotonicReader.getInstance(entry.offsetsMeta, addressesData);
       this.currentNeighborsBuffer = new int[entry.M];
       this.vectorSize = this.dimensions * this.encoding.byteSize;
@@ -425,20 +414,20 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     private final float[] value;
 
     static InGraphOffHeapFloatVectorValues load(FieldEntry entry, IndexInput vectorIndex)
-      throws IOException {
+        throws IOException {
       IndexInput slicedInput =
-        vectorIndex.slice("graph-data", entry.vectorIndexOffset, entry.vectorIndexLength);
+          vectorIndex.slice("graph-data", entry.vectorIndexOffset, entry.vectorIndexLength);
       RandomAccessInput addressesData =
-        vectorIndex.randomAccessSlice(entry.offsetsOffset, entry.offsetsLength);
+          vectorIndex.randomAccessSlice(entry.offsetsOffset, entry.offsetsLength);
       DirectMonotonicReader graphNodeOffsets =
-        DirectMonotonicReader.getInstance(entry.offsetsMeta, addressesData);
+          DirectMonotonicReader.getInstance(entry.offsetsMeta, addressesData);
 
       return new InGraphOffHeapFloatVectorValues(
-        slicedInput, entry.size, entry.dimension, graphNodeOffsets);
+          slicedInput, entry.size, entry.dimension, graphNodeOffsets);
     }
 
     InGraphOffHeapFloatVectorValues(
-      IndexInput vectorIndex, int size, int dimensions, DirectMonotonicReader graphNodeOffsets) {
+        IndexInput vectorIndex, int size, int dimensions, DirectMonotonicReader graphNodeOffsets) {
       this.dataIn = vectorIndex;
       this.size = size;
       this.dimensions = dimensions;
@@ -470,12 +459,10 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     public int docID() {
       return doc;
     }
-
   }
 
-
   private static class InGraphOffHeapQuantizedByteVectorValues extends QuantizedByteVectorValues
-    implements RandomAccessQuantizedByteVectorValues {
+      implements RandomAccessQuantizedByteVectorValues {
 
     final IndexInput dataIn;
     private final int size;
@@ -488,20 +475,20 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     protected final float[] scoreCorrectionConstant = new float[1];
 
     static InGraphOffHeapQuantizedByteVectorValues load(FieldEntry entry, IndexInput vectorIndex)
-      throws IOException {
+        throws IOException {
       IndexInput slicedInput =
-        vectorIndex.slice("graph-data", entry.vectorIndexOffset, entry.vectorIndexLength);
+          vectorIndex.slice("graph-data", entry.vectorIndexOffset, entry.vectorIndexLength);
       RandomAccessInput addressesData =
-        vectorIndex.randomAccessSlice(entry.offsetsOffset, entry.offsetsLength);
+          vectorIndex.randomAccessSlice(entry.offsetsOffset, entry.offsetsLength);
       DirectMonotonicReader graphNodeOffsets =
-        DirectMonotonicReader.getInstance(entry.offsetsMeta, addressesData);
+          DirectMonotonicReader.getInstance(entry.offsetsMeta, addressesData);
 
       return new InGraphOffHeapQuantizedByteVectorValues(
-        slicedInput, entry.size, entry.dimension, graphNodeOffsets);
+          slicedInput, entry.size, entry.dimension, graphNodeOffsets);
     }
 
     InGraphOffHeapQuantizedByteVectorValues(
-      IndexInput vectorIndex, int size, int dimensions, DirectMonotonicReader graphNodeOffsets) {
+        IndexInput vectorIndex, int size, int dimensions, DirectMonotonicReader graphNodeOffsets) {
       this.dataIn = vectorIndex;
       this.size = size;
       this.dimensions = dimensions;
@@ -543,7 +530,7 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
     @Override
     public RandomAccessQuantizedByteVectorValues copy() throws IOException {
       return new InGraphOffHeapQuantizedByteVectorValues(
-        this.dataIn.clone(), this.size, this.dimensions, this.graphNodeOffsets);
+          this.dataIn.clone(), this.size, this.dimensions, this.graphNodeOffsets);
     }
 
     @Override
@@ -570,5 +557,4 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader {
       return doc = target;
     }
   }
-
 }

@@ -576,7 +576,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
   /**
    * Writes the vector values to the output and returns a set of documents that contains vectors.
    */
-  private static DocsWithFieldSet writeQuantizedVectorData(
+  static DocsWithFieldSet writeQuantizedVectorData(
       IndexOutput output, QuantizedByteVectorValues quantizedByteVectorValues) throws IOException {
     DocsWithFieldSet docsWithField = new DocsWithFieldSet();
     for (int docV = quantizedByteVectorValues.nextDoc();
@@ -773,7 +773,9 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
           final QuantizedByteVectorValueSub sub;
           // Either our quantization parameters are way different than the merged ones
           // Or we have never been quantized.
+          // or we don't provide a view of previous quantized vectors
           if (reader == null
+              || reader.getQuantizedVectorValues(fieldInfo.name) == null
               || reader.getQuantizationState(fieldInfo.name) == null
               || shouldRequantize(reader.getQuantizationState(fieldInfo.name), scalarQuantizer)) {
             sub =
@@ -975,8 +977,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     }
   }
 
-  static final class OffsetCorrectedQuantizedByteVectorValues
-      extends QuantizedByteVectorValues {
+  static final class OffsetCorrectedQuantizedByteVectorValues extends QuantizedByteVectorValues {
 
     private final QuantizedByteVectorValues in;
     private final VectorSimilarityFunction vectorSimilarityFunction;

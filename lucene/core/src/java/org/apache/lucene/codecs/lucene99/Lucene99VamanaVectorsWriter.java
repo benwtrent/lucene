@@ -17,15 +17,24 @@
 
 package org.apache.lucene.codecs.lucene99;
 
+import static org.apache.lucene.codecs.lucene99.Lucene99ScalarQuantizedVectorsWriter.mergeAndRecalculateQuantiles;
+import static org.apache.lucene.codecs.lucene99.Lucene99ScalarQuantizedVectorsWriter.writeQuantizedVectorData;
+import static org.apache.lucene.codecs.lucene99.Lucene99VamanaVectorsFormat.DIRECT_MONOTONIC_BLOCK_SHIFT;
+import static org.apache.lucene.util.vamana.VamanaGraph.NodesIterator.getSortedNodes;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.FlatVectorsWriter;
 import org.apache.lucene.codecs.KnnFieldVectorsWriter;
 import org.apache.lucene.codecs.KnnVectorsWriter;
-import org.apache.lucene.codecs.lucene95.OrdToDocDISIReaderConfiguration;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.DocsWithFieldSet;
 import org.apache.lucene.index.FieldInfo;
-import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.MergeState;
 import org.apache.lucene.index.SegmentWriteState;
@@ -34,6 +43,7 @@ import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.TaskExecutor;
+import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.IOUtils;
@@ -41,31 +51,17 @@ import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.ScalarQuantizer;
 import org.apache.lucene.util.VectorUtil;
-import org.apache.lucene.util.hnsw.CloseableRandomVectorScorerSupplier;
-import org.apache.lucene.util.hnsw.ConcurrentHnswMerger;
-import org.apache.lucene.util.hnsw.HnswGraph;
 import org.apache.lucene.util.hnsw.HnswGraph.NodesIterator;
-import org.apache.lucene.util.hnsw.HnswGraphBuilder;
-import org.apache.lucene.util.hnsw.HnswGraphMerger;
-import org.apache.lucene.util.hnsw.IncrementalHnswGraphMerger;
 import org.apache.lucene.util.hnsw.NeighborArray;
-import org.apache.lucene.util.hnsw.OnHeapHnswGraph;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 import org.apache.lucene.util.hnsw.RandomVectorScorerSupplier;
 import org.apache.lucene.util.packed.DirectMonotonicWriter;
+import org.apache.lucene.util.vamana.ConcurrentVamanaMerger;
+import org.apache.lucene.util.vamana.IncrementalVamanaGraphMerger;
 import org.apache.lucene.util.vamana.OnHeapVamanaGraph;
 import org.apache.lucene.util.vamana.VamanaGraph;
 import org.apache.lucene.util.vamana.VamanaGraphBuilder;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
-import static org.apache.lucene.codecs.lucene99.Lucene99VamanaVectorsFormat.DIRECT_MONOTONIC_BLOCK_SHIFT;
-import static org.apache.lucene.util.vamana.VamanaGraph.NodesIterator.getSortedNodes;
+import org.apache.lucene.util.vamana.VamanaGraphMerger;
 
 /**
  * Writes vector values and knn graphs to index segments.
@@ -82,6 +78,8 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
   private final int beamWidth;
   private final FlatVectorsWriter flatVectorWriter;
   private final List<FieldWriter<?>> fields = new ArrayList<>();
+  private final int numMergeWorkers;
+  private final TaskExecutor mergeExec;
   private boolean finished;
 
   Lucene99VamanaVectorsWriter(
@@ -96,10 +94,14 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     this.flatVectorWriter = flatVectorWriter;
     this.beamWidth = beamWidth;
     segmentWriteState = state;
+    this.numMergeWorkers = numMergeWorkers;
+    this.mergeExec = mergeExec;
 
     String metaFileName =
         IndexFileNames.segmentFileName(
-            state.segmentInfo.name, state.segmentSuffix, Lucene99VamanaVectorsFormat.META_EXTENSION);
+            state.segmentInfo.name,
+            state.segmentSuffix,
+            Lucene99VamanaVectorsFormat.META_EXTENSION);
 
     String indexDataFileName =
         IndexFileNames.segmentFileName(
@@ -193,6 +195,7 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
         vectorIndexLength,
         fieldData.docsWithField.cardinality(),
         fieldData.getGraph(),
+        fieldData.quantizer,
         graphLevelNodeOffsets);
   }
 
@@ -225,12 +228,7 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     long vectorIndexOffset = vectorIndex.getFilePointer();
     VamanaGraph graph = fieldData.getGraph();
     int[] nodeOffsets = graph == null ? new int[0] : new int[graph.size()];
-    VamanaGraph mockGraph =
-      reconstructAndWriteGraph(
-        fieldData,
-        ordMap,
-        oldOrdMap,
-        nodeOffsets);
+    VamanaGraph mockGraph = reconstructAndWriteGraph(fieldData, ordMap, oldOrdMap, nodeOffsets);
     long vectorIndexLength = vectorIndex.getFilePointer() - vectorIndexOffset;
 
     writeMeta(
@@ -239,26 +237,27 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
         vectorIndexLength,
         fieldData.docsWithField.cardinality(),
         mockGraph,
-      nodeOffsets);
+        fieldData.quantizer,
+        nodeOffsets);
   }
 
   private VamanaGraph reconstructAndWriteGraph(
-    FieldWriter<?> fieldData,
-    int[] newToOldMap,
-    int[] oldToNewMap,
-    int[] nodeOffsets)
+      FieldWriter<?> fieldData, int[] newToOldMap, int[] oldToNewMap, int[] nodeOffsets)
       throws IOException {
-    VamanaGraph graph = fieldData.getGraph();
+    List<?> vectors = fieldData.vectors;
+    OnHeapVamanaGraph graph = fieldData.getGraph();
     if (fieldData.builtGraph == null) {
       return null;
     }
     VectorEncoding encoding = fieldData.fieldInfo.getVectorEncoding();
-    int dimensions = fieldData.dim;
-
-    ByteBuffer vectorBuffer =
-      encoding == VectorEncoding.FLOAT32
-        ? ByteBuffer.allocate(dimensions * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN)
-        : null;
+    ByteBuffer quantizationOffsetBuffer =
+        ByteBuffer.allocate(Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+    ScalarQuantizer quantizer = fieldData.quantizer;
+    byte[] quantizedVector = new byte[fieldData.dim];
+    float[] normalizeCopy =
+        fieldData.fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE
+            ? new float[fieldData.dim]
+            : null;
 
     int maxOrd = graph.size();
     VamanaGraph.NodesIterator nodes = graph.getNodes();
@@ -267,17 +266,29 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
 
       int node = nodes.nextInt();
 
-      // Write the full fidelity vector
-      // TODO: support scalar quantization
       switch (encoding) {
         case BYTE -> {
           byte[] v = (byte[]) vectors.get(node);
           vectorIndex.writeBytes(v, v.length);
         }
         case FLOAT32 -> {
-          float[] v = (float[]) vectors.get(node);
-          vectorBuffer.asFloatBuffer().put(v);
-          vectorIndex.writeBytes(vectorBuffer.array(), vectorBuffer.array().length);
+          assert fieldData.quantizer != null;
+          float[] vector = (float[]) fieldData.vectors.get(node);
+          if (fieldData.fieldInfo.getVectorSimilarityFunction()
+              == VectorSimilarityFunction.COSINE) {
+            System.arraycopy(vector, 0, normalizeCopy, 0, normalizeCopy.length);
+            VectorUtil.l2normalize(normalizeCopy);
+          }
+          float offsetCorrection =
+              quantizer.quantize(
+                  normalizeCopy != null ? normalizeCopy : vector,
+                  quantizedVector,
+                  fieldData.fieldInfo.getVectorSimilarityFunction());
+          vectorIndex.writeBytes(quantizedVector, quantizedVector.length);
+          quantizationOffsetBuffer.putFloat(offsetCorrection);
+          vectorIndex.writeBytes(
+              quantizationOffsetBuffer.array(), quantizationOffsetBuffer.array().length);
+          quantizationOffsetBuffer.rewind();
         }
       }
 
@@ -348,59 +359,170 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
 
   @Override
   public void mergeOneField(FieldInfo fieldInfo, MergeState mergeState) throws IOException {
-    CloseableRandomVectorScorerSupplier scorerSupplier =
-        flatVectorWriter.mergeOneFieldToIndex(fieldInfo, mergeState);
+    // TODO mergeToIndex if its a byte field
+    flatVectorWriter.mergeOneField(fieldInfo, mergeState);
+    IndexOutput tempQuantizedVectorData =
+        segmentWriteState.directory.createTempOutput(
+            vectorIndex.getName() + "_q8", "temp", segmentWriteState.context);
+    IndexInput quantizationDataInput = null;
     boolean success = false;
     try {
+      // merge quantizaiton actions
+      ScalarQuantizer mergedQuantizationState =
+          mergeAndRecalculateQuantiles(
+              mergeState,
+              fieldInfo,
+              Lucene99ScalarQuantizedVectorsFormat.calculateDefaultConfidenceInterval(
+                  fieldInfo.getVectorDimension()));
+      Lucene99ScalarQuantizedVectorsWriter.MergedQuantizedVectorValues byteVectorValues =
+          Lucene99ScalarQuantizedVectorsWriter.MergedQuantizedVectorValues
+              .mergeQuantizedByteVectorValues(fieldInfo, mergeState, mergedQuantizationState);
+      DocsWithFieldSet docsWithField =
+          writeQuantizedVectorData(tempQuantizedVectorData, byteVectorValues);
+      quantizationDataInput =
+          segmentWriteState.directory.openInput(
+              tempQuantizedVectorData.getName(), segmentWriteState.context);
+      RandomVectorScorerSupplier scorerSupplier =
+          new ScalarQuantizedRandomVectorScorerSupplier(
+              fieldInfo.getVectorSimilarityFunction(),
+              mergedQuantizationState,
+              new OffHeapQuantizedByteVectorValues.DenseOffHeapVectorValues(
+                  fieldInfo.getVectorDimension(),
+                  docsWithField.cardinality(),
+                  quantizationDataInput));
+
       long vectorIndexOffset = vectorIndex.getFilePointer();
       // build the graph using the temporary vector data
       // we use Lucene99HnswVectorsReader.DenseOffHeapVectorValues for the graph construction
       // doesn't need to know docIds
       // TODO: separate random access vector values from DocIdSetIterator?
-      OnHeapHnswGraph graph = null;
-      int[][] vectorIndexNodeOffsets = null;
-      if (scorerSupplier.totalVectorCount() > 0) {
+      OnHeapVamanaGraph graph = null;
+      int[] vectorIndexNodeOffsets = null;
+      if (docsWithField.cardinality() > 0) {
         // build graph
-        HnswGraphMerger merger = createGraphMerger(fieldInfo, scorerSupplier);
+        VamanaGraphMerger merger = createGraphMerger(fieldInfo, scorerSupplier);
         for (int i = 0; i < mergeState.liveDocs.length; i++) {
           merger.addReader(
               mergeState.knnVectorsReaders[i], mergeState.docMaps[i], mergeState.liveDocs[i]);
         }
-        DocIdSetIterator mergedVectorIterator = null;
-        switch (fieldInfo.getVectorEncoding()) {
-          case BYTE -> mergedVectorIterator =
-              MergedVectorValues.mergeByteVectorValues(fieldInfo, mergeState);
-          case FLOAT32 -> mergedVectorIterator =
-              MergedVectorValues.mergeFloatVectorValues(fieldInfo, mergeState);
-        }
         graph =
             merger.merge(
-                mergedVectorIterator,
-                segmentWriteState.infoStream,
-                scorerSupplier.totalVectorCount());
-        vectorIndexNodeOffsets = writeGraph(graph);
+                byteVectorValues, segmentWriteState.infoStream, docsWithField.cardinality());
+        vectorIndexNodeOffsets =
+            writeMergedGraph(
+                graph,
+                fieldInfo.getVectorEncoding(),
+                fieldInfo.getVectorSimilarityFunction(),
+                fieldInfo.getVectorDimension(),
+                mergedQuantizationState,
+                byteVectorValues);
       }
       long vectorIndexLength = vectorIndex.getFilePointer() - vectorIndexOffset;
       writeMeta(
           fieldInfo,
           vectorIndexOffset,
           vectorIndexLength,
-          scorerSupplier.totalVectorCount(),
+          docsWithField.cardinality(),
           graph,
+          mergedQuantizationState,
           vectorIndexNodeOffsets);
       success = true;
     } finally {
       if (success) {
-        IOUtils.close(scorerSupplier);
+        IOUtils.close(quantizationDataInput);
+        segmentWriteState.directory.deleteFile(tempQuantizedVectorData.getName());
       } else {
-        IOUtils.closeWhileHandlingException(scorerSupplier);
+        IOUtils.closeWhileHandlingException(tempQuantizedVectorData, quantizationDataInput);
+        IOUtils.deleteFilesIgnoringExceptions(
+            segmentWriteState.directory, tempQuantizedVectorData.getName());
       }
     }
   }
 
+  private VamanaGraphMerger createGraphMerger(
+      FieldInfo fieldInfo, RandomVectorScorerSupplier scorerSupplier) {
+    if (mergeExec != null) {
+      return new ConcurrentVamanaMerger(
+          fieldInfo, scorerSupplier, M, beamWidth, 1.2f, mergeExec, numMergeWorkers);
+    }
+    return new IncrementalVamanaGraphMerger(fieldInfo, scorerSupplier, M, beamWidth, 1.2f);
+  }
+
+  private int[] writeMergedGraph(
+      OnHeapVamanaGraph graph,
+      VectorEncoding encoding,
+      VectorSimilarityFunction similarityFunction,
+      int dimensions,
+      ScalarQuantizer quantizer,
+      DocIdSetIterator vectors)
+      throws IOException {
+    boolean quantized = quantizer != null;
+    ByteBuffer vectorBuffer =
+        encoding == VectorEncoding.FLOAT32
+            ? ByteBuffer.allocate(dimensions * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN)
+            : null;
+    ByteBuffer quantizationOffsetBuffer =
+        quantized ? ByteBuffer.allocate(Float.BYTES).order(ByteOrder.LITTLE_ENDIAN) : null;
+    float[] normalizeCopy =
+        quantized && similarityFunction == VectorSimilarityFunction.COSINE
+            ? new float[dimensions]
+            : null;
+
+    int[] sortedNodes = getSortedNodes(graph.getNodes());
+    int[] offsets = new int[sortedNodes.length];
+    int nodeOffsetId = 0;
+    QuantizedByteVectorValues quantizedVectors = (QuantizedByteVectorValues) vectors;
+
+    for (int node : sortedNodes) {
+      long offsetStart = vectorIndex.getFilePointer();
+      assert vectors.nextDoc() == node;
+      // Write the full fidelity vector
+      switch (encoding) {
+        case BYTE -> {
+          byte[] v = ((ByteVectorValues) vectors).vectorValue();
+          vectorIndex.writeBytes(v, v.length);
+        }
+        case FLOAT32 -> {
+          byte[] quantizedVector = quantizedVectors.vectorValue();
+          float offsetCorrection = quantizedVectors.getScoreCorrectionConstant();
+          vectorIndex.writeBytes(quantizedVector, quantizedVector.length);
+          quantizationOffsetBuffer.putFloat(offsetCorrection);
+          vectorIndex.writeBytes(
+              quantizationOffsetBuffer.array(), quantizationOffsetBuffer.array().length);
+          quantizationOffsetBuffer.rewind();
+        }
+      }
+
+      NeighborArray neighbors = graph.getNeighbors(node);
+      int size = neighbors.size();
+
+      // Write size in VInt as the neighbors list is typically small
+      vectorIndex.writeVInt(size);
+
+      // Encode neighbors as vints.
+      int[] nnodes = neighbors.nodes();
+      Arrays.sort(nnodes, 0, size);
+
+      // Convert neighbors to their deltas from the previous neighbor.
+      for (int i = size - 1; i > 0; --i) {
+        nnodes[i] -= nnodes[i - 1];
+      }
+      for (int i = 0; i < size; i++) {
+        vectorIndex.writeVInt(nnodes[i]);
+      }
+
+      if (encoding == VectorEncoding.FLOAT32 && !quantized) {
+        vectorIndex.alignFilePointer(Float.BYTES);
+      }
+
+      var offset = Math.toIntExact(vectorIndex.getFilePointer() - offsetStart);
+      offsets[nodeOffsetId++] = offset;
+    }
+
+    return offsets;
+  }
+
   /**
-   * @param graph Write the graph in a compressed format
-   * @return The non-cumulative offsets for the nodes. Should be used to create cumulative offsets.
    * @throws IOException if writing to vectorIndex fails
    */
   private int[] writeGraph(FieldWriter<?> fieldData) throws IOException {
@@ -410,19 +532,14 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     }
 
     VectorEncoding encoding = fieldData.fieldInfo.getVectorEncoding();
-    ByteBuffer vectorBuffer =
-      encoding == VectorEncoding.FLOAT32
-        ? ByteBuffer.allocate(fieldData.dim * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN)
-        : null;
-    ByteBuffer quantizationOffsetBuffer = ByteBuffer.allocate(Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
-    ScalarQuantizer quantizer =
-      fieldData.isQuantized() ? fieldData.quantizedWriter.createQuantizer() : null;
+    ByteBuffer quantizationOffsetBuffer =
+        ByteBuffer.allocate(Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+    ScalarQuantizer quantizer = fieldData.quantizer;
+    byte[] quantizedVector = new byte[fieldData.dim];
     float[] normalizeCopy =
-      fieldData.isQuantized()
-        && fieldData.fieldInfo.getVectorSimilarityFunction()
-        == VectorSimilarityFunction.COSINE
-        ? new float[fieldData.dim]
-        : null;
+        fieldData.fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE
+            ? new float[fieldData.dim]
+            : null;
 
     int[] sortedNodes = getSortedNodes(graph.getNodes());
     int[] offsets = new int[sortedNodes.length];
@@ -439,24 +556,22 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
             vectorIndex.writeBytes(v, v.length);
           }
           case FLOAT32 -> {
-              float[] vector = (float[]) fieldData.vectors.get(node);
-              if (fieldData.fieldInfo.getVectorSimilarityFunction()
+            float[] vector = (float[]) fieldData.vectors.get(node);
+            if (fieldData.fieldInfo.getVectorSimilarityFunction()
                 == VectorSimilarityFunction.COSINE) {
-                System.arraycopy(vector, 0, normalizeCopy, 0, normalizeCopy.length);
-                VectorUtil.l2normalize(normalizeCopy);
-              }
-
-              byte[] quantizedVector = new byte[fieldData.dim];
-              float offsetCorrection =
+              System.arraycopy(vector, 0, normalizeCopy, 0, normalizeCopy.length);
+              VectorUtil.l2normalize(normalizeCopy);
+            }
+            float offsetCorrection =
                 quantizer.quantize(
-                  normalizeCopy != null ? normalizeCopy : vector,
-                  quantizedVector,
-                  fieldData.fieldInfo.getVectorSimilarityFunction());
-              vectorIndex.writeBytes(quantizedVector, quantizedVector.length);
-              quantizationOffsetBuffer.putFloat(offsetCorrection);
-              vectorIndex.writeBytes(
+                    normalizeCopy != null ? normalizeCopy : vector,
+                    quantizedVector,
+                    fieldData.fieldInfo.getVectorSimilarityFunction());
+            vectorIndex.writeBytes(quantizedVector, quantizedVector.length);
+            quantizationOffsetBuffer.putFloat(offsetCorrection);
+            vectorIndex.writeBytes(
                 quantizationOffsetBuffer.array(), quantizationOffsetBuffer.array().length);
-              quantizationOffsetBuffer.rewind();
+            quantizationOffsetBuffer.rewind();
           }
         }
       }
@@ -490,96 +605,6 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     return offsets;
   }
 
-  private int[] writeMergedGraph(
-    OnHeapVamanaGraph graph,
-    VectorEncoding encoding,
-    VectorSimilarityFunction similarityFunction,
-    int dimensions,
-    ScalarQuantizer quantizer,
-    DocIdSetIterator vectors)
-    throws IOException {
-    boolean quantized = quantizer != null;
-    ByteBuffer vectorBuffer =
-      encoding == VectorEncoding.FLOAT32
-        ? ByteBuffer.allocate(dimensions * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN)
-        : null;
-    ByteBuffer quantizationOffsetBuffer =
-      quantized ? ByteBuffer.allocate(Float.BYTES).order(ByteOrder.LITTLE_ENDIAN) : null;
-    float[] normalizeCopy =
-      quantized && similarityFunction == VectorSimilarityFunction.COSINE
-        ? new float[dimensions]
-        : null;
-
-    int[] sortedNodes = getSortedNodes(graph.getNodes());
-    int[] offsets = new int[sortedNodes.length];
-    int nodeOffsetId = 0;
-
-    for (int node : sortedNodes) {
-      long offsetStart = vectorIndex.getFilePointer();
-      assert vectors.nextDoc() == node;
-
-        // Write the full fidelity vector
-        switch (encoding) {
-          case BYTE -> {
-            byte[] v = ((ByteVectorValues) vectors).vectorValue();
-            vectorIndex.writeBytes(v, v.length);
-          }
-          case FLOAT32 -> {
-            if (quantized) {
-              float[] vector = ((FloatVectorValues) vectors).vectorValue();
-              if (similarityFunction == VectorSimilarityFunction.COSINE) {
-                System.arraycopy(vector, 0, normalizeCopy, 0, normalizeCopy.length);
-                VectorUtil.l2normalize(normalizeCopy);
-              }
-
-              byte[] quantizedVector = new byte[dimensions];
-              float offsetCorrection =
-                quantizer.quantize(
-                  normalizeCopy != null ? normalizeCopy : vector,
-                  quantizedVector,
-                  similarityFunction);
-              vectorIndex.writeBytes(quantizedVector, quantizedVector.length);
-              quantizationOffsetBuffer.putFloat(offsetCorrection);
-              vectorIndex.writeBytes(
-                quantizationOffsetBuffer.array(), quantizationOffsetBuffer.array().length);
-              quantizationOffsetBuffer.rewind();
-            } else {
-              float[] v = ((FloatVectorValues) vectors).vectorValue();
-              vectorBuffer.asFloatBuffer().put(v);
-              vectorIndex.writeBytes(vectorBuffer.array(), vectorBuffer.array().length);
-            }
-          }
-        }
-
-      NeighborArray neighbors = graph.getNeighbors(node);
-      int size = neighbors.size();
-
-      // Write size in VInt as the neighbors list is typically small
-      vectorIndex.writeVInt(size);
-
-      // Encode neighbors as vints.
-      int[] nnodes = neighbors.nodes();
-      Arrays.sort(nnodes, 0, size);
-
-      // Convert neighbors to their deltas from the previous neighbor.
-      for (int i = size - 1; i > 0; --i) {
-        nnodes[i] -= nnodes[i - 1];
-      }
-      for (int i = 0; i < size; i++) {
-        vectorIndex.writeVInt(nnodes[i]);
-      }
-
-      if (encoding == VectorEncoding.FLOAT32 && !quantized) {
-        vectorIndex.alignFilePointer(Float.BYTES);
-      }
-
-      var offset = Math.toIntExact(vectorIndex.getFilePointer() - offsetStart);
-      offsets[nodeOffsetId++] = offset;
-    }
-
-    return offsets;
-  }
-
   private void writeMeta(
       FieldInfo field,
       long vectorIndexOffset,
@@ -593,26 +618,9 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     meta.writeInt(field.getVectorEncoding().ordinal());
     meta.writeInt(field.getVectorSimilarityFunction().ordinal());
     meta.writeByte((byte) 1);
-    if (isQuantized) {
-      assert lowerQuantile != null
-        && upperQuantile != null
-        && quantizedVectorDataOffsetAndLen != null;
-      assert quantizedVectorDataOffsetAndLen.length == 2;
-      meta.writeInt(
-        Float.floatToIntBits(
-          configuredQuantizationQuantile != null
-            ? configuredQuantizationQuantile
-            : calculateDefaultQuantile(field.getVectorDimension())));
-      meta.writeInt(Float.floatToIntBits(lowerQuantile));
-      meta.writeInt(Float.floatToIntBits(upperQuantile));
-      meta.writeVLong(quantizedVectorDataOffsetAndLen[0]);
-      meta.writeVLong(quantizedVectorDataOffsetAndLen[1]);
-    } else {
-      assert configuredQuantizationQuantile == null
-        && lowerQuantile == null
-        && upperQuantile == null
-        && quantizedVectorDataOffsetAndLen == null;
-    }
+    assert quantizer != null;
+    meta.writeInt(Float.floatToIntBits(quantizer.getLowerQuantile()));
+    meta.writeInt(Float.floatToIntBits(quantizer.getUpperQuantile()));
     meta.writeVLong(vectorIndexOffset);
     meta.writeVLong(vectorIndexLength);
     meta.writeVInt(field.getVectorDimension());
@@ -630,8 +638,8 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
       meta.writeLong(start);
       meta.writeVInt(DIRECT_MONOTONIC_BLOCK_SHIFT);
       final DirectMonotonicWriter memoryOffsetsWriter =
-        DirectMonotonicWriter.getInstance(
-          meta, vectorIndex, graph.size(), DIRECT_MONOTONIC_BLOCK_SHIFT);
+          DirectMonotonicWriter.getInstance(
+              meta, vectorIndex, graph.size(), DIRECT_MONOTONIC_BLOCK_SHIFT);
       long cumulativeOffsetSum = 0;
       for (int v : graphNodeOffsets) {
         memoryOffsetsWriter.add(cumulativeOffsetSum);
@@ -653,30 +661,24 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     private final DocsWithFieldSet docsWithField;
     private final List<T> vectors;
     private final VamanaGraphBuilder vamanaGraphBuilder;
-    private VamanaGraph builtGraph;
+    private OnHeapVamanaGraph builtGraph;
     ScalarQuantizer quantizer;
 
     private int lastDocID = -1;
     private int node = 0;
 
     static FieldWriter<?> create(
-      FieldInfo fieldInfo,
-      int M,
-      int beamWidth,
-      float alpha,
-      InfoStream infoStream)
-      throws IOException {
+        FieldInfo fieldInfo, int M, int beamWidth, float alpha, InfoStream infoStream)
+        throws IOException {
       int dim = fieldInfo.getVectorDimension();
       return switch (fieldInfo.getVectorEncoding()) {
-        case BYTE -> new FieldWriter<byte[]>(
-          fieldInfo, M, beamWidth, alpha, infoStream) {
+        case BYTE -> new FieldWriter<byte[]>(fieldInfo, M, beamWidth, alpha, infoStream) {
           @Override
           public byte[] copyValue(byte[] value) {
             return ArrayUtil.copyOfSubArray(value, 0, dim);
           }
         };
-        case FLOAT32 -> new FieldWriter<float[]>(
-          fieldInfo, M, beamWidth, alpha, infoStream) {
+        case FLOAT32 -> new FieldWriter<float[]>(fieldInfo, M, beamWidth, alpha, infoStream) {
           @Override
           public float[] copyValue(float[] value) {
             return ArrayUtil.copyOfSubArray(value, 0, dim);
@@ -686,27 +688,23 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     }
 
     @SuppressWarnings("unchecked")
-    FieldWriter(
-      FieldInfo fieldInfo,
-      int M,
-      int beamWidth,
-      float alpha,
-      InfoStream infoStream)
-      throws IOException {
+    FieldWriter(FieldInfo fieldInfo, int M, int beamWidth, float alpha, InfoStream infoStream)
+        throws IOException {
       this.fieldInfo = fieldInfo;
       this.dim = fieldInfo.getVectorDimension();
       this.docsWithField = new DocsWithFieldSet();
       vectors = new ArrayList<>();
-      Lucene99HnswVectorsWriter.RAVectorValues<T> raVectors = new Lucene99HnswVectorsWriter.RAVectorValues<>(vectors, dim);
+      Lucene99HnswVectorsWriter.RAVectorValues<T> raVectors =
+          new Lucene99HnswVectorsWriter.RAVectorValues<>(vectors, dim);
       RandomVectorScorerSupplier scorerSupplier =
-        switch (fieldInfo.getVectorEncoding()) {
-          case BYTE -> RandomVectorScorerSupplier.createBytes(
-            (RandomAccessVectorValues<byte[]>) raVectors,
-            fieldInfo.getVectorSimilarityFunction());
-          case FLOAT32 -> RandomVectorScorerSupplier.createFloats(
-            (RandomAccessVectorValues<float[]>) raVectors,
-            fieldInfo.getVectorSimilarityFunction());
-        };
+          switch (fieldInfo.getVectorEncoding()) {
+            case BYTE -> RandomVectorScorerSupplier.createBytes(
+                (RandomAccessVectorValues<byte[]>) raVectors,
+                fieldInfo.getVectorSimilarityFunction());
+            case FLOAT32 -> RandomVectorScorerSupplier.createFloats(
+                (RandomAccessVectorValues<float[]>) raVectors,
+                fieldInfo.getVectorSimilarityFunction());
+          };
       vamanaGraphBuilder = VamanaGraphBuilder.create(scorerSupplier, M, beamWidth, alpha);
       vamanaGraphBuilder.setInfoStream(infoStream);
     }
@@ -715,9 +713,9 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
     public void addValue(int docID, T vectorValue) throws IOException {
       if (docID == lastDocID) {
         throw new IllegalArgumentException(
-          "VectorValuesField \""
-            + fieldInfo.name
-            + "\" appears more than once in this document (only one value is allowed per field)");
+            "VectorValuesField \""
+                + fieldInfo.name
+                + "\" appears more than once in this document (only one value is allowed per field)");
       }
       assert docID > lastDocID;
       T copy = copyValue(vectorValue);
@@ -733,7 +731,7 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
       return null;
     }
 
-    VamanaGraph getGraph() {
+    OnHeapVamanaGraph getGraph() {
       return builtGraph;
     }
 
@@ -743,11 +741,11 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
       if (vectors.size() > 0) {
         builtGraph = vamanaGraphBuilder.getGraph();
         quantizer =
-          ScalarQuantizer.fromVectors(
-            new Lucene99ScalarQuantizedVectorsWriter.FloatVectorWrapper(
-              (List<float[]>)vectors,
-              fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE),
-            Lucene99ScalarQuantizedVectorsFormat.calculateDefaultConfidenceInterval(dim));
+            ScalarQuantizer.fromVectors(
+                new Lucene99ScalarQuantizedVectorsWriter.FloatVectorWrapper(
+                    (List<float[]>) vectors,
+                    fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE),
+                Lucene99ScalarQuantizedVectorsFormat.calculateDefaultConfidenceInterval(dim));
       }
     }
 
@@ -757,12 +755,12 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
         return 0;
       }
       return docsWithField.ramBytesUsed()
-        + (long) vectors.size()
-        * (RamUsageEstimator.NUM_BYTES_OBJECT_REF + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER)
-        + (long) vectors.size()
-        * fieldInfo.getVectorDimension()
-        * fieldInfo.getVectorEncoding().byteSize
-        + vamanaGraphBuilder.getGraph().ramBytesUsed();
+          + (long) vectors.size()
+              * (RamUsageEstimator.NUM_BYTES_OBJECT_REF + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER)
+          + (long) vectors.size()
+              * fieldInfo.getVectorDimension()
+              * fieldInfo.getVectorEncoding().byteSize
+          + vamanaGraphBuilder.getGraph().ramBytesUsed();
     }
   }
 }
