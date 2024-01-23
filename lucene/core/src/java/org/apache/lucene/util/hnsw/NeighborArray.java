@@ -34,8 +34,8 @@ import org.apache.lucene.util.ArrayUtil;
 public class NeighborArray {
   private final boolean scoresDescOrder;
   private int size;
-  private final float[] scores;
-  private final int[] nodes;
+  public final float[] scores;
+  public final int[] nodes;
   private int sortedNodeSize;
   public final ReadWriteLock rwlock = new ReentrantReadWriteLock(true);
 
@@ -158,7 +158,7 @@ public class NeighborArray {
   }
 
   /** This method is for test only. */
-  void insertSorted(int newNode, float newScore) throws IOException {
+  public void insertSorted(int newNode, float newScore) throws IOException {
     addOutOfOrder(newNode, newScore);
     insertSortedInternal(null);
   }

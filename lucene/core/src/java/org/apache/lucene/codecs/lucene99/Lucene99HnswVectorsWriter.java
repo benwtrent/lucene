@@ -580,7 +580,7 @@ public final class Lucene99HnswVectorsWriter extends KnnVectorsWriter {
     }
   }
 
-  private static class RAVectorValues<T> implements RandomAccessVectorValues<T> {
+  static class RAVectorValues<T> implements RandomAccessVectorValues<T> {
     private final List<T> vectors;
     private final int dim;
 

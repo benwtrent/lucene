@@ -741,7 +741,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     }
   }
 
-  private static class QuantizedByteVectorValueSub extends DocIDMerger.Sub {
+  static class QuantizedByteVectorValueSub extends DocIDMerger.Sub {
     private final QuantizedByteVectorValues values;
 
     QuantizedByteVectorValueSub(MergeState.DocMap docMap, QuantizedByteVectorValues values) {
@@ -860,7 +860,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     }
   }
 
-  private static class QuantizedFloatVectorValues extends QuantizedByteVectorValues {
+  static class QuantizedFloatVectorValues extends QuantizedByteVectorValues {
     private final FloatVectorValues values;
     private final ScalarQuantizer quantizer;
     private final byte[] quantizedVector;
@@ -975,7 +975,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     }
   }
 
-  private static final class OffsetCorrectedQuantizedByteVectorValues
+  static final class OffsetCorrectedQuantizedByteVectorValues
       extends QuantizedByteVectorValues {
 
     private final QuantizedByteVectorValues in;
