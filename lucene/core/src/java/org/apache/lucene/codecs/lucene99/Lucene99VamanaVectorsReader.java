@@ -338,6 +338,7 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader
     private final int[] currentNeighborsBuffer;
     private final int vectorSize;
 
+    // TODO correct vector size
     OffHeapVamanaGraph(FieldEntry entry, IndexInput vectorIndex) throws IOException {
       this.dataIn =
           vectorIndex.slice("graph-data", entry.vectorIndexOffset, entry.vectorIndexLength);
@@ -351,7 +352,8 @@ public final class Lucene99VamanaVectorsReader extends KnnVectorsReader
           vectorIndex.randomAccessSlice(entry.offsetsOffset, entry.offsetsLength);
       this.graphNodeOffsets = DirectMonotonicReader.getInstance(entry.offsetsMeta, addressesData);
       this.currentNeighborsBuffer = new int[entry.M];
-      this.vectorSize = this.dimensions * this.encoding.byteSize;
+      // quantized bytes + corrective offset
+      this.vectorSize = this.dimensions + Float.BYTES;
     }
 
     public void seek(int targetOrd) throws IOException {

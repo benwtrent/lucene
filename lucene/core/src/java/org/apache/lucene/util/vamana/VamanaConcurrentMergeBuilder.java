@@ -72,7 +72,6 @@ public class VamanaConcurrentMergeBuilder implements VamanaBuilder {
           VamanaGraphBuilder.VAMANA_COMPONENT,
           "build graph from " + maxOrd + " vectors, with " + workers.length + " workers");
     }
-    List<Future<?>> futures = new ArrayList<>();
     List<Callable<Void>> tasks = new ArrayList<>(workers.length);
     for (int i = 0; i < workers.length; i++) {
       int finalI = i;

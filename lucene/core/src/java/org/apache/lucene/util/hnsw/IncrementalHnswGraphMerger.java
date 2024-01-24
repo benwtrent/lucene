@@ -96,7 +96,7 @@ public class IncrementalHnswGraphMerger implements HnswGraphMerger {
         candidateVectorCount = vectorValues.size();
       }
     }
-    if (candidateVectorCount > initGraphSize) {
+    if (false) {
       initReader = currKnnVectorsReader;
       initDocMap = docMap;
       initGraphSize = candidateVectorCount;

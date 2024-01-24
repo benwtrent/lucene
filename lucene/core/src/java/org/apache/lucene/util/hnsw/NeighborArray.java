@@ -34,8 +34,8 @@ import org.apache.lucene.util.ArrayUtil;
 public class NeighborArray {
   private final boolean scoresDescOrder;
   private int size;
-  public final float[] scores;
-  public final int[] nodes;
+  public float[] scores;
+  public int[] nodes;
   private int sortedNodeSize;
   public final ReadWriteLock rwlock = new ReentrantReadWriteLock(true);
 
@@ -52,7 +52,8 @@ public class NeighborArray {
   public void addInOrder(int newNode, float newScore) {
     assert size == sortedNodeSize : "cannot call addInOrder after addOutOfOrder";
     if (size == nodes.length) {
-      throw new IllegalStateException("No growth is allowed");
+      nodes = ArrayUtil.grow(nodes);
+      scores = ArrayUtil.growExact(scores, nodes.length);
     }
     if (size > 0) {
       float previousScore = scores[size - 1];
@@ -72,7 +73,8 @@ public class NeighborArray {
   /** Add node and newScore but do not insert as sorted */
   public void addOutOfOrder(int newNode, float newScore) {
     if (size == nodes.length) {
-      throw new IllegalStateException("No growth is allowed");
+      nodes = ArrayUtil.grow(nodes);
+      scores = ArrayUtil.growExact(scores, nodes.length);
     }
 
     scores[size] = newScore;

@@ -379,9 +379,12 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
               .mergeQuantizedByteVectorValues(fieldInfo, mergeState, mergedQuantizationState);
       DocsWithFieldSet docsWithField =
           writeQuantizedVectorData(tempQuantizedVectorData, byteVectorValues);
+      CodecUtil.writeFooter(tempQuantizedVectorData);
+      IOUtils.close(tempQuantizedVectorData);
       quantizationDataInput =
           segmentWriteState.directory.openInput(
               tempQuantizedVectorData.getName(), segmentWriteState.context);
+      CodecUtil.retrieveChecksum(quantizationDataInput);
       RandomVectorScorerSupplier scorerSupplier =
           new ScalarQuantizedRandomVectorScorerSupplier(
               fieldInfo.getVectorSimilarityFunction(),
@@ -407,7 +410,10 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
         }
         graph =
             merger.merge(
-                byteVectorValues, segmentWriteState.infoStream, docsWithField.cardinality());
+              KnnVectorsWriter.MergedVectorValues.mergeFloatVectorValues(fieldInfo, mergeState),
+              segmentWriteState.infoStream,
+              docsWithField.cardinality()
+            );
         vectorIndexNodeOffsets =
             writeMergedGraph(
                 graph,
@@ -415,7 +421,10 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
                 fieldInfo.getVectorSimilarityFunction(),
                 fieldInfo.getVectorDimension(),
                 mergedQuantizationState,
-                byteVectorValues);
+                new OffHeapQuantizedByteVectorValues.DenseOffHeapVectorValues(
+                fieldInfo.getVectorDimension(),
+                docsWithField.cardinality(),
+                quantizationDataInput));
       }
       long vectorIndexLength = vectorIndex.getFilePointer() - vectorIndexOffset;
       writeMeta(
@@ -475,7 +484,11 @@ public final class Lucene99VamanaVectorsWriter extends KnnVectorsWriter {
 
     for (int node : sortedNodes) {
       long offsetStart = vectorIndex.getFilePointer();
-      assert vectors.nextDoc() == node;
+      int docId = vectors.nextDoc();
+      if (docId != node) {
+        throw new IllegalStateException("docId=" + docId + " node=" + node);
+      }
+      assert docId == node;
       // Write the full fidelity vector
       switch (encoding) {
         case BYTE -> {
