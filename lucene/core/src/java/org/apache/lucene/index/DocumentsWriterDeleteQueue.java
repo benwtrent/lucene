@@ -576,7 +576,7 @@ final class DocumentsWriterDeleteQueue implements Accountable, Closeable {
    * Inserts a gap in the sequence numbers. This is used by IW during flush or commit to ensure any
    * in-flight threads get sequence numbers inside the gap
    */
-  void skipSequenceNumbers(long jump) {
+  synchronized void skipSequenceNumbers(long jump) {
     nextSeqNo.addAndGet(jump);
   }
 
