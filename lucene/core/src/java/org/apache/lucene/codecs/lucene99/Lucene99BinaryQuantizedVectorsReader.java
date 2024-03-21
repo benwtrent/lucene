@@ -209,7 +209,7 @@ public final class Lucene99BinaryQuantizedVectorsReader extends FlatVectorsReade
     return new RandomVectorScorer() {
       @Override
       public float score(int node) throws IOException {
-        return hammingDistanceScore(vectorValues.vectorValue(node), quantized);
+        return hammingDistanceScore(vectorValues.vectorValue(node), quantized, fieldEntry.dimension);
       }
 
       @Override
@@ -219,7 +219,7 @@ public final class Lucene99BinaryQuantizedVectorsReader extends FlatVectorsReade
     };
   }
 
-  private static float hammingDistanceScore(byte[] a, byte[] b) {
+  public static float hammingDistanceScore(byte[] a, byte[] b, int dim) {
     int distance = 0, i = 0;
     for (final int upperBound = a.length & ~(Long.BYTES - 1); i < upperBound; i += Long.BYTES) {
       distance +=
@@ -230,7 +230,7 @@ public final class Lucene99BinaryQuantizedVectorsReader extends FlatVectorsReade
     for (; i < a.length; i++) {
       distance += Integer.bitCount((a[i] ^ b[i]) & 0xFF);
     }
-    return 1f / distance;
+    return dim - distance;
   }
 
   @Override
