@@ -305,14 +305,16 @@ public final class Lucene99FlatVectorsWriter extends FlatVectorsWriter {
                     fieldInfo.getVectorDimension(),
                     docsWithField.cardinality(),
                     finalVectorDataInput,
-                    fieldInfo.getVectorDimension() * Byte.BYTES),
+                    fieldInfo.getVectorDimension() * Byte.BYTES,
+                    0L),
                 fieldInfo.getVectorSimilarityFunction());
             case FLOAT32 -> RandomVectorScorerSupplier.createFloats(
                 new OffHeapFloatVectorValues.DenseOffHeapVectorValues(
                     fieldInfo.getVectorDimension(),
                     docsWithField.cardinality(),
                     finalVectorDataInput,
-                    fieldInfo.getVectorDimension() * Float.BYTES),
+                    fieldInfo.getVectorDimension() * Float.BYTES,
+                    0L),
                 fieldInfo.getVectorSimilarityFunction());
           };
       return new FlatCloseableRandomVectorScorerSupplier(

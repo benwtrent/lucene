@@ -484,7 +484,8 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
                   docsWithField.cardinality(),
                   bits,
                   compress,
-                  quantizationDataInput)));
+                  quantizationDataInput,
+                  0L)));
     } finally {
       if (success == false) {
         IOUtils.closeWhileHandlingException(tempQuantizedVectorData, quantizationDataInput);
@@ -1053,7 +1054,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     }
   }
 
-  static final class ScalarQuantizedCloseableRandomVectorScorerSupplier
+  public static final class ScalarQuantizedCloseableRandomVectorScorerSupplier
       implements CloseableRandomVectorScorerSupplier {
 
     private final ScalarQuantizedRandomVectorScorerSupplier supplier;

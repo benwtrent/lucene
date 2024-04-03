@@ -149,5 +149,55 @@ public interface RandomVectorScorer {
     public Bits getAcceptOrds(Bits acceptDocs) {
       return values.getAcceptOrds(acceptDocs);
     }
+
+    public RandomAccessVectorValues<T> getValues() {
+      return values;
+    }
+  }
+
+  class FloatVectorScorer extends AbstractRandomVectorScorer<float[]> {
+    private final float[] query;
+    private final VectorSimilarityFunction similarityFunction;
+
+    public FloatVectorScorer(
+        RandomAccessVectorValues<float[]> values,
+        float[] query,
+        VectorSimilarityFunction similarityFunction) {
+      super(values);
+      this.similarityFunction = similarityFunction;
+      this.query = query;
+    }
+
+    @Override
+    public float score(int node) throws IOException {
+      return getVectorSimilarityFunction().compare(query, getValues().vectorValue(node));
+    }
+
+    public VectorSimilarityFunction getVectorSimilarityFunction() {
+      return similarityFunction;
+    }
+  }
+
+  class ByteVectorScorer extends AbstractRandomVectorScorer<byte[]> {
+    private final byte[] query;
+    private final VectorSimilarityFunction similarityFunction;
+
+    public ByteVectorScorer(
+        RandomAccessVectorValues<byte[]> values,
+        byte[] query,
+        VectorSimilarityFunction similarityFunction) {
+      super(values);
+      this.similarityFunction = similarityFunction;
+      this.query = query;
+    }
+
+    @Override
+    public float score(int node) throws IOException {
+      return getVectorSimilarityFunction().compare(query, getValues().vectorValue(node));
+    }
+
+    public VectorSimilarityFunction getVectorSimilarityFunction() {
+      return similarityFunction;
+    }
   }
 }

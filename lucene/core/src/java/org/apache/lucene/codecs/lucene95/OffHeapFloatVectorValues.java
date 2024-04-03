@@ -29,7 +29,7 @@ import org.apache.lucene.util.packed.DirectMonotonicReader;
 
 /** Read the vector values from the index input. This supports both iterated and random access. */
 public abstract class OffHeapFloatVectorValues extends FloatVectorValues
-    implements RandomAccessVectorValues<float[]> {
+    implements RandomAccessVectorValues<float[]>, OffHeapRandomAccessVectorValues {
 
   protected final int dimension;
   protected final int size;
@@ -37,12 +37,15 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
   protected final int byteSize;
   protected int lastOrd = -1;
   protected final float[] value;
+  protected final long vectorDataOffset;
 
-  OffHeapFloatVectorValues(int dimension, int size, IndexInput slice, int byteSize) {
+  OffHeapFloatVectorValues(
+      int dimension, int size, IndexInput slice, int byteSize, long vectorDataOffset) {
     this.dimension = dimension;
     this.size = size;
     this.slice = slice;
     this.byteSize = byteSize;
+    this.vectorDataOffset = vectorDataOffset;
     value = new float[dimension];
   }
 
@@ -67,6 +70,21 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
     return value;
   }
 
+  @Override
+  public int vectorByteLength() {
+    return byteSize;
+  }
+
+  @Override
+  public IndexInput getSlice() {
+    return slice;
+  }
+
+  @Override
+  public long getVectorOffset(int targetOrd) {
+    return vectorDataOffset + (long) targetOrd * byteSize;
+  }
+
   public static OffHeapFloatVectorValues load(
       OrdToDocDISIReaderConfiguration configuration,
       VectorEncoding vectorEncoding,
@@ -81,10 +99,11 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
     IndexInput bytesSlice = vectorData.slice("vector-data", vectorDataOffset, vectorDataLength);
     int byteSize = dimension * Float.BYTES;
     if (configuration.docsWithFieldOffset == -1) {
-      return new DenseOffHeapVectorValues(dimension, configuration.size, bytesSlice, byteSize);
+      return new DenseOffHeapVectorValues(
+          dimension, configuration.size, bytesSlice, byteSize, vectorDataOffset);
     } else {
       return new SparseOffHeapVectorValues(
-          configuration, vectorData, bytesSlice, dimension, byteSize);
+          configuration, vectorData, bytesSlice, dimension, byteSize, vectorDataOffset);
     }
   }
 
@@ -96,8 +115,9 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
 
     private int doc = -1;
 
-    public DenseOffHeapVectorValues(int dimension, int size, IndexInput slice, int byteSize) {
-      super(dimension, size, slice, byteSize);
+    public DenseOffHeapVectorValues(
+        int dimension, int size, IndexInput slice, int byteSize, long vectorDataOffset) {
+      super(dimension, size, slice, byteSize, vectorDataOffset);
     }
 
     @Override
@@ -126,7 +146,8 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
 
     @Override
     public RandomAccessVectorValues<float[]> copy() throws IOException {
-      return new DenseOffHeapVectorValues(dimension, size, slice.clone(), byteSize);
+      return new DenseOffHeapVectorValues(
+          dimension, size, slice.clone(), byteSize, vectorDataOffset);
     }
 
     @Override
@@ -147,10 +168,11 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
         IndexInput dataIn,
         IndexInput slice,
         int dimension,
-        int byteSize)
+        int byteSize,
+        long vectorDataOffset)
         throws IOException {
 
-      super(dimension, configuration.size, slice, byteSize);
+      super(dimension, configuration.size, slice, byteSize, vectorDataOffset);
       this.configuration = configuration;
       final RandomAccessInput addressesData =
           dataIn.randomAccessSlice(configuration.addressesOffset, configuration.addressesLength);
@@ -190,7 +212,7 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
     @Override
     public RandomAccessVectorValues<float[]> copy() throws IOException {
       return new SparseOffHeapVectorValues(
-          configuration, dataIn, slice.clone(), dimension, byteSize);
+          configuration, dataIn, slice.clone(), dimension, byteSize, vectorDataOffset);
     }
 
     @Override
@@ -220,7 +242,7 @@ public abstract class OffHeapFloatVectorValues extends FloatVectorValues
   private static class EmptyOffHeapVectorValues extends OffHeapFloatVectorValues {
 
     public EmptyOffHeapVectorValues(int dimension) {
-      super(dimension, 0, null, 0);
+      super(dimension, 0, null, 0, 0L);
     }
 
     private int doc = -1;

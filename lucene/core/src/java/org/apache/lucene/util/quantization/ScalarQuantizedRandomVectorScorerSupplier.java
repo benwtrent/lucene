@@ -59,4 +59,12 @@ public class ScalarQuantizedRandomVectorScorerSupplier implements RandomVectorSc
   public RandomVectorScorerSupplier copy() throws IOException {
     return new ScalarQuantizedRandomVectorScorerSupplier(similarity, values.copy());
   }
+
+  public RandomAccessQuantizedByteVectorValues getValues() {
+    return values;
+  }
+
+  public ScalarQuantizedVectorSimilarity getSimilarity() {
+    return similarity;
+  }
 }

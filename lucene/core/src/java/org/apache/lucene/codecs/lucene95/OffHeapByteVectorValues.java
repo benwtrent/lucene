@@ -39,14 +39,17 @@ public abstract class OffHeapByteVectorValues extends ByteVectorValues
   protected final byte[] binaryValue;
   protected final ByteBuffer byteBuffer;
   protected final int byteSize;
+  protected final long vectorDataOffset;
 
-  OffHeapByteVectorValues(int dimension, int size, IndexInput slice, int byteSize) {
+  OffHeapByteVectorValues(
+      int dimension, int size, IndexInput slice, int byteSize, long vectorDataOffset) {
     this.dimension = dimension;
     this.size = size;
     this.slice = slice;
     this.byteSize = byteSize;
     byteBuffer = ByteBuffer.allocate(byteSize);
     binaryValue = byteBuffer.array();
+    this.vectorDataOffset = vectorDataOffset;
   }
 
   @Override
@@ -87,10 +90,11 @@ public abstract class OffHeapByteVectorValues extends ByteVectorValues
     IndexInput bytesSlice = vectorData.slice("vector-data", vectorDataOffset, vectorDataLength);
     int byteSize = dimension;
     if (configuration.isDense()) {
-      return new DenseOffHeapVectorValues(dimension, configuration.size, bytesSlice, byteSize);
+      return new DenseOffHeapVectorValues(
+          dimension, configuration.size, bytesSlice, byteSize, vectorDataOffset);
     } else {
       return new SparseOffHeapVectorValues(
-          configuration, vectorData, bytesSlice, dimension, byteSize);
+          configuration, vectorData, bytesSlice, dimension, byteSize, vectorDataOffset);
     }
   }
 
@@ -102,8 +106,9 @@ public abstract class OffHeapByteVectorValues extends ByteVectorValues
 
     private int doc = -1;
 
-    public DenseOffHeapVectorValues(int dimension, int size, IndexInput slice, int byteSize) {
-      super(dimension, size, slice, byteSize);
+    public DenseOffHeapVectorValues(
+        int dimension, int size, IndexInput slice, int byteSize, long vectorDataOffset) {
+      super(dimension, size, slice, byteSize, vectorDataOffset);
     }
 
     @Override
@@ -132,7 +137,8 @@ public abstract class OffHeapByteVectorValues extends ByteVectorValues
 
     @Override
     public RandomAccessVectorValues<byte[]> copy() throws IOException {
-      return new DenseOffHeapVectorValues(dimension, size, slice.clone(), byteSize);
+      return new DenseOffHeapVectorValues(
+          dimension, size, slice.clone(), byteSize, vectorDataOffset);
     }
 
     @Override
@@ -153,10 +159,11 @@ public abstract class OffHeapByteVectorValues extends ByteVectorValues
         IndexInput dataIn,
         IndexInput slice,
         int dimension,
-        int byteSize)
+        int byteSize,
+        long vectorDataOffset)
         throws IOException {
 
-      super(dimension, configuration.size, slice, byteSize);
+      super(dimension, configuration.size, slice, byteSize, vectorDataOffset);
       this.configuration = configuration;
       final RandomAccessInput addressesData =
           dataIn.randomAccessSlice(configuration.addressesOffset, configuration.addressesLength);
@@ -196,7 +203,7 @@ public abstract class OffHeapByteVectorValues extends ByteVectorValues
     @Override
     public RandomAccessVectorValues<byte[]> copy() throws IOException {
       return new SparseOffHeapVectorValues(
-          configuration, dataIn, slice.clone(), dimension, byteSize);
+          configuration, dataIn, slice.clone(), dimension, byteSize, vectorDataOffset);
     }
 
     @Override
@@ -226,7 +233,7 @@ public abstract class OffHeapByteVectorValues extends ByteVectorValues
   private static class EmptyOffHeapVectorValues extends OffHeapByteVectorValues {
 
     public EmptyOffHeapVectorValues(int dimension) {
-      super(dimension, 0, null, 0);
+      super(dimension, 0, null, 0, 0L);
     }
 
     private int doc = -1;

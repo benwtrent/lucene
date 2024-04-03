@@ -87,17 +87,17 @@ public interface RandomVectorScorerSupplier {
 
     @Override
     public RandomVectorScorer scorer(int ord) throws IOException {
-      return new RandomVectorScorer.AbstractRandomVectorScorer<>(vectors) {
-        @Override
-        public float score(int cand) throws IOException {
-          return similarityFunction.compare(vectors1.vectorValue(ord), vectors2.vectorValue(cand));
-        }
-      };
+      return new RandomVectorScorer.ByteVectorScorer(
+          vectors2, vectors1.vectorValue(ord), similarityFunction);
     }
 
     @Override
     public RandomVectorScorerSupplier copy() throws IOException {
       return new ByteScoringSupplier(vectors, similarityFunction);
+    }
+
+    public RandomAccessVectorValues<byte[]> getVectors() {
+      return vectors;
     }
   }
 
@@ -119,17 +119,17 @@ public interface RandomVectorScorerSupplier {
 
     @Override
     public RandomVectorScorer scorer(int ord) throws IOException {
-      return new RandomVectorScorer.AbstractRandomVectorScorer<>(vectors) {
-        @Override
-        public float score(int cand) throws IOException {
-          return similarityFunction.compare(vectors1.vectorValue(ord), vectors2.vectorValue(cand));
-        }
-      };
+      return new RandomVectorScorer.FloatVectorScorer(
+          vectors2, vectors1.vectorValue(ord), similarityFunction);
     }
 
     @Override
     public RandomVectorScorerSupplier copy() throws IOException {
       return new FloatScoringSupplier(vectors, similarityFunction);
+    }
+
+    public RandomAccessVectorValues<float[]> getVectors() {
+      return vectors;
     }
   }
 }
