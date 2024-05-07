@@ -27,6 +27,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenFilter;
@@ -359,6 +360,20 @@ public class TestIndexWriterExceptions extends LuceneTestCase {
     }
   }
 
+  private static final class PauseAfterDocUpdateTestPoint implements RandomIndexWriter.TestPoint {
+    AtomicBoolean doFail = new AtomicBoolean();
+
+    @Override
+    public void apply(String name) {
+      if (name.equals("Update documents end")) {
+        doFail.set(true);
+        while (doFail.get()) {
+          Thread.yield();
+        }
+      }
+    }
+  }
+
   private static String CRASH_FAIL_MESSAGE = "I'm experiencing problems";
 
   private static class CrashingFilter extends TokenFilter {
@@ -443,6 +458,69 @@ public class TestIndexWriterExceptions extends LuceneTestCase {
 
     w.addDocument(doc);
     w.close();
+    dir.close();
+  }
+
+  public void testExceptionJustBeforeFlushWithPointValues() throws Exception {
+    Directory dir = newDirectory();
+
+    Analyzer analyzer =
+        new Analyzer(Analyzer.PER_FIELD_REUSE_STRATEGY) {
+          @Override
+          public TokenStreamComponents createComponents(String fieldName) {
+            MockTokenizer tokenizer = new MockTokenizer(MockTokenizer.WHITESPACE, false);
+            tokenizer.setEnableChecks(
+                false); // disable workflow checking as we forcefully close() in exceptional cases.
+            TokenStream stream = new CrashingFilter(fieldName, tokenizer);
+            return new TokenStreamComponents(tokenizer, stream);
+          }
+        };
+    DirectoryReader r = null;
+    Thread t = null;
+    PauseAfterDocUpdateTestPoint testPoint = new PauseAfterDocUpdateTestPoint();
+    try (IndexWriter w =
+        RandomIndexWriter.mockIndexWriter(
+            random(),
+            dir,
+            newIndexWriterConfig(analyzer).setCommitOnClose(false).setMaxBufferedDocs(3),
+            testPoint)) {
+      Document doc = new Document();
+      doc.add(newTextField("field", "a field", Field.Store.YES));
+      w.addDocument(doc);
+      w.commit();
+      Document newdoc = new Document();
+      newdoc.add(newTextField("crash", "do it on token 4", Field.Store.NO));
+      newdoc.add(new IntPoint("int", 17));
+      t =
+          new Thread(
+              () -> {
+                expectThrows(IOException.class, () -> w.addDocument(newdoc));
+              });
+      t.start();
+      r = w.getReader(false, false);
+      while (testPoint.doFail.get() == false) {
+        if (r != null) {
+          r.close();
+        }
+        r = w.getReader(false, false);
+        Thread.onSpinWait();
+      }
+      DirectoryReader newr = DirectoryReader.openIfChanged(r);
+      if (newr != null) {
+        r.close();
+        r = newr;
+      }
+      Thread.yield();
+      testPoint.doFail.set(false);
+      newr = DirectoryReader.openIfChanged(r);
+      if (newr != null) {
+        r.close();
+        r = newr;
+      }
+    }
+    if (r != null) {
+      r.close();
+    }
     dir.close();
   }
 

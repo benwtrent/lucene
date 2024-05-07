@@ -435,6 +435,11 @@ final class DocumentsWriter implements Closeable, Accountable {
       } else {
         perThreadPool.marksAsFreeAndUnlock(dwpt);
       }
+      try {
+        Thread.sleep(10);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
       assert dwpt.isHeldByCurrentThread() == false : "we didn't release the dwpt even on abort";
     }
 

@@ -1563,6 +1563,7 @@ public class IndexWriter
       throw tragedy;
     } finally {
       if (success == false) {
+        testPoint("Update documents end");
         if (infoStream.isEnabled("IW")) {
           infoStream.message("IW", "hit exception updating document");
         }

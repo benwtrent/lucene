@@ -476,6 +476,8 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
         infoStream.message(
             "DWPT",
             "new segment has "
+                + (flushState.fieldInfos.hasPointValues() ? "point values" : "no point values")
+                + "; "
                 + (flushState.fieldInfos.hasVectors() ? "vectors" : "no vectors")
                 + "; "
                 + (flushState.fieldInfos.hasNorms() ? "norms" : "no norms")
