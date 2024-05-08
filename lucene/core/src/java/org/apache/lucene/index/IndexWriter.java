@@ -2449,7 +2449,6 @@ public class IndexWriter
   @Override
   public void rollback() throws IOException {
     // don't call ensureOpen here: this acts like "close()" in closeable.
-    testPoint("rollback start");
     // Ensure that only one thread actually gets to do the
     // closing, and make sure no commit is also in progress:
     if (shouldClose(true)) {
