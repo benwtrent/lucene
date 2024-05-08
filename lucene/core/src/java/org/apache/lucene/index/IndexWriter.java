@@ -2447,7 +2447,7 @@ public class IndexWriter
   @Override
   public void rollback() throws IOException {
     // don't call ensureOpen here: this acts like "close()" in closeable.
-    
+
     // Ensure that only one thread actually gets to do the
     // closing, and make sure no commit is also in progress:
     if (shouldClose(true)) {
@@ -2497,6 +2497,7 @@ public class IndexWriter
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "rollback: done finish merges");
       }
+
       // Must pre-close in case it increments changeCount so that we can then
       // set it to false before calling rollbackInternal
       mergeScheduler.close();
