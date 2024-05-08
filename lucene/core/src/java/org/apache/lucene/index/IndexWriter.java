@@ -572,6 +572,7 @@ public class IndexWriter
       boolean success = false;
       synchronized (fullFlushLock) {
         try {
+          testPoint("startGetReader");
           // TODO: should we somehow make the seqNo available in the returned NRT reader?
           anyChanges = docWriter.flushAllThreads() < 0;
           if (anyChanges == false) {
@@ -2448,7 +2449,7 @@ public class IndexWriter
   @Override
   public void rollback() throws IOException {
     // don't call ensureOpen here: this acts like "close()" in closeable.
-
+    testPoint("rollback start");
     // Ensure that only one thread actually gets to do the
     // closing, and make sure no commit is also in progress:
     if (shouldClose(true)) {
@@ -2498,7 +2499,7 @@ public class IndexWriter
       if (infoStream.isEnabled("IW")) {
         infoStream.message("IW", "rollback: done finish merges");
       }
-
+      testPoint("before docWriter Close");
       // Must pre-close in case it increments changeCount so that we can then
       // set it to false before calling rollbackInternal
       mergeScheduler.close();

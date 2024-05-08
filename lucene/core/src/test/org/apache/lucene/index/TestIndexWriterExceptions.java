@@ -26,8 +26,8 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenFilter;
@@ -48,6 +48,7 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.PhraseQuery;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.ByteBuffersDirectory;
@@ -361,14 +362,30 @@ public class TestIndexWriterExceptions extends LuceneTestCase {
   }
 
   private static final class PauseAfterDocUpdateTestPoint implements RandomIndexWriter.TestPoint {
-    AtomicBoolean doFail = new AtomicBoolean();
+    CountDownLatch latchForFailure = new CountDownLatch(1);
+    CountDownLatch latchForReader = new CountDownLatch(1);
+    CountDownLatch latchForDocWriterCloseAlert = new CountDownLatch(1);
+    CountDownLatch latchForDocWriterClose = new CountDownLatch(1);
 
     @Override
     public void apply(String name) {
       if (name.equals("Update documents end")) {
-        doFail.set(true);
-        while (doFail.get()) {
-          Thread.yield();
+        latchForFailure.countDown();
+      }
+      if (name.equals("startGetReader")) {
+        latchForReader.countDown();
+        try {
+          latchForDocWriterCloseAlert.await();
+        } catch (InterruptedException e) {
+          throw new RuntimeException(e);
+        }
+      }
+      if (name.equals("before docWriter Close")) {
+        try {
+          latchForDocWriterCloseAlert.countDown();
+          latchForDocWriterClose.await();
+        } catch (InterruptedException e) {
+          throw new RuntimeException(e);
         }
       }
     }
@@ -463,7 +480,6 @@ public class TestIndexWriterExceptions extends LuceneTestCase {
 
   public void testExceptionJustBeforeFlushWithPointValues() throws Exception {
     Directory dir = newDirectory();
-
     Analyzer analyzer =
         new Analyzer(Analyzer.PER_FIELD_REUSE_STRATEGY) {
           @Override
@@ -478,49 +494,34 @@ public class TestIndexWriterExceptions extends LuceneTestCase {
     DirectoryReader r = null;
     Thread t = null;
     PauseAfterDocUpdateTestPoint testPoint = new PauseAfterDocUpdateTestPoint();
-    try (IndexWriter w =
-        RandomIndexWriter.mockIndexWriter(
-            random(),
-            dir,
-            newIndexWriterConfig(analyzer).setCommitOnClose(false).setMaxBufferedDocs(3),
-            testPoint)) {
-      Document doc = new Document();
-      doc.add(newTextField("field", "a field", Field.Store.YES));
-      w.addDocument(doc);
-      w.commit();
-      Document newdoc = new Document();
-      newdoc.add(newTextField("crash", "do it on token 4", Field.Store.NO));
-      newdoc.add(new IntPoint("int", 17));
-      t =
-          new Thread(
-              () -> {
-                expectThrows(IOException.class, () -> w.addDocument(newdoc));
-              });
-      t.start();
+    IndexWriterConfig iwc =
+        newIndexWriterConfig(analyzer).setCommitOnClose(false).setMaxBufferedDocs(3);
+    MergePolicy mp = iwc.getMergePolicy();
+    iwc.setMergePolicy(
+        new SoftDeletesRetentionMergePolicy("soft_delete", MatchAllDocsQuery::new, mp));
+    IndexWriter w = RandomIndexWriter.mockIndexWriter(random(), dir, iwc, testPoint);
+    Document newdoc = new Document();
+    newdoc.add(newTextField("crash", "do it on token 4", Field.Store.NO));
+    newdoc.add(new IntPoint("int", 17));
+    t =
+        new Thread(
+            () -> {
+              expectThrows(IOException.class, () -> w.addDocument(newdoc));
+              try {
+                testPoint.latchForReader.await();
+                w.rollback();
+              } catch (Exception e) {
+                throw new RuntimeException(e);
+              }
+            });
+    t.start();
+    testPoint.latchForFailure.await();
+    try {
       r = w.getReader(false, false);
-      while (testPoint.doFail.get() == false) {
-        if (r != null) {
-          r.close();
-        }
-        r = w.getReader(false, false);
-        Thread.onSpinWait();
-      }
-      DirectoryReader newr = DirectoryReader.openIfChanged(r);
-      if (newr != null) {
-        r.close();
-        r = newr;
-      }
-      Thread.yield();
-      testPoint.doFail.set(false);
-      newr = DirectoryReader.openIfChanged(r);
-      if (newr != null) {
-        r.close();
-        r = newr;
-      }
+    } catch (AlreadyClosedException ace) {
+      // expected
     }
-    if (r != null) {
-      r.close();
-    }
+    t.join();
     dir.close();
   }
 
