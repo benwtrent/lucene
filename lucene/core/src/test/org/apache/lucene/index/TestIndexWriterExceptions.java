@@ -361,36 +361,6 @@ public class TestIndexWriterExceptions extends LuceneTestCase {
     }
   }
 
-  private static final class PauseAfterDocUpdateTestPoint implements RandomIndexWriter.TestPoint {
-    CountDownLatch latchForFailure = new CountDownLatch(1);
-    CountDownLatch latchForReader = new CountDownLatch(1);
-    CountDownLatch latchForDocWriterCloseAlert = new CountDownLatch(1);
-    CountDownLatch latchForDocWriterClose = new CountDownLatch(1);
-
-    @Override
-    public void apply(String name) {
-      if (name.equals("Update documents end")) {
-        latchForFailure.countDown();
-      }
-      if (name.equals("startGetReader")) {
-        latchForReader.countDown();
-        try {
-          latchForDocWriterCloseAlert.await();
-        } catch (InterruptedException e) {
-          throw new RuntimeException(e);
-        }
-      }
-      if (name.equals("before docWriter Close")) {
-        try {
-          latchForDocWriterCloseAlert.countDown();
-          latchForDocWriterClose.await();
-        } catch (InterruptedException e) {
-          throw new RuntimeException(e);
-        }
-      }
-    }
-  }
-
   private static String CRASH_FAIL_MESSAGE = "I'm experiencing problems";
 
   private static class CrashingFilter extends TokenFilter {
@@ -492,36 +462,21 @@ public class TestIndexWriterExceptions extends LuceneTestCase {
           }
         };
     DirectoryReader r = null;
-    Thread t = null;
-    PauseAfterDocUpdateTestPoint testPoint = new PauseAfterDocUpdateTestPoint();
     IndexWriterConfig iwc =
         newIndexWriterConfig(analyzer).setCommitOnClose(false).setMaxBufferedDocs(3);
     MergePolicy mp = iwc.getMergePolicy();
     iwc.setMergePolicy(
         new SoftDeletesRetentionMergePolicy("soft_delete", MatchAllDocsQuery::new, mp));
-    IndexWriter w = RandomIndexWriter.mockIndexWriter(random(), dir, iwc, testPoint);
+    IndexWriter w = RandomIndexWriter.mockIndexWriter(dir, iwc, random());
     Document newdoc = new Document();
     newdoc.add(newTextField("crash", "do it on token 4", Field.Store.NO));
     newdoc.add(new IntPoint("int", 17));
-    t =
-        new Thread(
-            () -> {
-              expectThrows(IOException.class, () -> w.addDocument(newdoc));
-              try {
-                testPoint.latchForReader.await();
-                w.rollback();
-              } catch (Exception e) {
-                throw new RuntimeException(e);
-              }
-            });
-    t.start();
-    testPoint.latchForFailure.await();
+    expectThrows(IOException.class, () -> w.addDocument(newdoc));
     try {
       r = w.getReader(false, false);
     } catch (AlreadyClosedException ace) {
       // expected
     }
-    t.join();
     dir.close();
   }
 
