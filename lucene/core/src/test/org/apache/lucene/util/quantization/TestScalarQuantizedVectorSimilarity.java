@@ -60,7 +60,7 @@ public class TestScalarQuantizedVectorSimilarity extends LuceneTestCase {
       FloatVectorValues floatVectorValues = fromFloats(floats);
       ScalarQuantizer scalarQuantizer =
           ScalarQuantizer.fromVectors(
-              floatVectorValues, confidenceInterval, floats.length, (byte) 7);
+              floatVectorValues, confidenceInterval, floats.length, (byte) 8);
       byte[][] quantized = new byte[floats.length][];
       float[] offsets =
           quantizeVectors(scalarQuantizer, floats, quantized, VectorSimilarityFunction.EUCLIDEAN);
@@ -93,7 +93,7 @@ public class TestScalarQuantizedVectorSimilarity extends LuceneTestCase {
       FloatVectorValues floatVectorValues = fromFloatsNormalized(floats, null);
       ScalarQuantizer scalarQuantizer =
           ScalarQuantizer.fromVectors(
-              floatVectorValues, confidenceInterval, floats.length, (byte) 7);
+              floatVectorValues, confidenceInterval, floats.length, (byte) 8);
       byte[][] quantized = new byte[floats.length][];
       float[] offsets =
           quantizeVectorsNormalized(
@@ -130,7 +130,7 @@ public class TestScalarQuantizedVectorSimilarity extends LuceneTestCase {
       FloatVectorValues floatVectorValues = fromFloats(floats);
       ScalarQuantizer scalarQuantizer =
           ScalarQuantizer.fromVectors(
-              floatVectorValues, confidenceInterval, floats.length, (byte) 7);
+              floatVectorValues, confidenceInterval, floats.length, (byte) 8);
       byte[][] quantized = new byte[floats.length][];
       float[] offsets =
           quantizeVectors(scalarQuantizer, floats, quantized, VectorSimilarityFunction.DOT_PRODUCT);

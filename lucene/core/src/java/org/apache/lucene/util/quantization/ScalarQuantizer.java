@@ -133,6 +133,10 @@ public class ScalarQuantizer {
     // Scale the value to the range [0, 127], this is our quantized value
     // scale = 127/(maxQuantile - minQuantile)
     float dxs = scale * dxc;
+    if (bits == 8) {
+      dxs = (2 * dxs) - 127;
+      dxs = Math.max(-127, Math.min(127, dxs));
+    }
     // We multiply by `alpha` here to get the quantized value back into the original range
     // to aid in calculating the corrective offset
     float dxq = Math.round(dxs) * alpha;
