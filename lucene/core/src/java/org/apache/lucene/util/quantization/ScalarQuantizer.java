@@ -75,6 +75,7 @@ public class ScalarQuantizer {
   // 20*dimension provides protection from extreme confidence intervals
   // and also prevents humongous allocations
   static final int SCRATCH_SIZE = 20;
+  private static final float SIGNED_CORRECTION = 127;
 
   private final float alpha;
   private final float scale;
@@ -136,7 +137,7 @@ public class ScalarQuantizer {
     if (dest != null) {
       float dxsRounded;
       if (bits == 8) {
-        dxsRounded = Math.round(Math.max(-127, Math.min(127, dxs - 128)));
+        dxsRounded = Math.round(Math.max(-127, Math.min(127, dxs - SIGNED_CORRECTION)));
       } else {
         dxsRounded = Math.round(dxs);
       }
@@ -148,8 +149,10 @@ public class ScalarQuantizer {
     double signedByteCorrection = 0;
     double addlCorrection = 0;
     if (bits == 8) {
-      signedByteCorrection = Math.pow(alpha * 127.0, 2)/2.0 + alpha * alpha * 127 * dxs + alpha * 127 * minQuantile;
+      // This assumes a corrected
+      signedByteCorrection = Math.pow(alpha * SIGNED_CORRECTION, 2)/2.0 + alpha * alpha * SIGNED_CORRECTION * dxs + alpha * SIGNED_CORRECTION * minQuantile;
     } else {
+      // TODO Does this handle the sign shifting correctly?
       addlCorrection = (dx - dxq) * dxq;
     }
     // Calculate the corrective offset that needs to be applied to the score
@@ -157,8 +160,6 @@ public class ScalarQuantizer {
     // we add the `(dx - dxq) * dxq` term to account for the fact that the quantized value
     // will be rounded to the nearest whole number and lose some accuracy
     // Additionally, we account for the global correction of `minQuantile^2` in the equation
-    //return minQuantile * (v - minQuantile / 2.0F) + (dx - dxq) * dxq + Math.pow(alpha * c, 2)/2 + alpha * alpha * c + alpha * c * minQuantile;
-    // a^2 c^2 + a^2 c x + a^2 c y + a^2 x y + 2 a c m + a m x + a m y + m^2
     return minQuantile * (v - minQuantile / 2.0F) + addlCorrection + signedByteCorrection;
   }
 
