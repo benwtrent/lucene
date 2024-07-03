@@ -143,24 +143,26 @@ public class ScalarQuantizer {
       }
       dest[destIndex] = (byte) dxsRounded;
     }
-    // We multiply by `alpha` here to get the quantized value back into the original range
-    // to aid in calculating the corrective offset
-    float dxq = Math.round(dxs) * alpha;
-    double signedByteCorrection = 0;
-    double addlCorrection = 0;
+    final double addlCorrection;
+    // Calculate the corrective offset that needs to be applied to the score
     if (bits == 8) {
-      // This assumes a corrected
-      signedByteCorrection = Math.pow(alpha * SIGNED_CORRECTION, 2)/2.0 + alpha * alpha * SIGNED_CORRECTION * dxs + alpha * SIGNED_CORRECTION * minQuantile;
+      // We adjust for the linear shift due to `c`
+      addlCorrection =
+          Math.pow(alpha * SIGNED_CORRECTION, 2) / 2.0
+              + alpha * SIGNED_CORRECTION * dxc
+              + alpha * SIGNED_CORRECTION * minQuantile;
     } else {
+      // We multiply by `alpha` here to get the quantized value back into the original range
+      // to aid in calculating the corrective offset
+      float dxq = Math.round(dxs) * alpha;
       // TODO Does this handle the sign shifting correctly?
+      // we add the `(dx - dxq) * dxq` term to account for the fact that the quantized value
+      // will be rounded to the nearest whole number and lose some accuracy
       addlCorrection = (dx - dxq) * dxq;
     }
-    // Calculate the corrective offset that needs to be applied to the score
     // in addition to the `byte * minQuantile * alpha` term in the equation
-    // we add the `(dx - dxq) * dxq` term to account for the fact that the quantized value
-    // will be rounded to the nearest whole number and lose some accuracy
-    // Additionally, we account for the global correction of `minQuantile^2` in the equation
-    return minQuantile * (v - minQuantile / 2.0F) + addlCorrection + signedByteCorrection;
+    // we account for the global correction of `minQuantile^2` in the equation
+    return minQuantile * (v - minQuantile / 2.0F) + addlCorrection;
   }
 
   /**

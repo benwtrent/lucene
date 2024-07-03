@@ -81,7 +81,7 @@ public interface ScalarQuantizedVectorSimilarity {
         byte[] queryVector, float queryOffset, byte[] storedVector, float vectorOffset) {
       int dotProduct = comparator.compare(storedVector, queryVector);
       // For the current implementation of scalar quantization, all dotproducts should be >= 0;
-      //assert dotProduct >= 0;
+      // assert dotProduct >= 0;
       float adjustedDistance = dotProduct * constMultiplier + queryOffset + vectorOffset;
       return Math.max((1 + adjustedDistance) / 2, 0);
     }
