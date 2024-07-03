@@ -45,7 +45,7 @@ import org.apache.lucene.util.Selector;
  * quantiles of the vector values [minQuantile, maxQuantile].
  *
  * <pre class="prettyprint">
- *   byte = (float - minQuantile) * 127/(maxQuantile - minQuantile)
+ *   byte = (float - minQuantile) * 255/(maxQuantile - minQuantile)
  *   float = (maxQuantile - minQuantile)/127 * byte + minQuantile
  * </pre>
  *
@@ -113,42 +113,53 @@ public class ScalarQuantizer {
    */
   public float quantize(float[] src, byte[] dest, VectorSimilarityFunction similarityFunction) {
     assert src.length == dest.length;
-    float correction = 0;
+    double correction = 0;
     for (int i = 0; i < src.length; i++) {
       correction += quantizeFloat(src[i], dest, i);
     }
     if (similarityFunction.equals(VectorSimilarityFunction.EUCLIDEAN)) {
       return 0;
     }
-    return correction;
+    return (float) correction;
   }
 
-  private float quantizeFloat(float v, byte[] dest, int destIndex) {
+  private double quantizeFloat(float v, byte[] dest, int destIndex) {
     assert dest == null || destIndex < dest.length;
     // Make sure the value is within the quantile range, cutting off the tails
-    // see first parenthesis in equation: byte = (float - minQuantile) * 127/(maxQuantile -
-    // minQuantile)
+    // see first parenthesis in equation:
+    // byte = (float - minQuantile) * 127/(maxQuantile -minQuantile)
     float dx = v - minQuantile;
     float dxc = Math.max(minQuantile, Math.min(maxQuantile, v)) - minQuantile;
     // Scale the value to the range [0, 127], this is our quantized value
     // scale = 127/(maxQuantile - minQuantile)
     float dxs = scale * dxc;
-    if (bits == 8) {
-      dxs = (2 * dxs) - 127;
-      dxs = Math.max(-127, Math.min(127, dxs));
+    if (dest != null) {
+      float dxsRounded;
+      if (bits == 8) {
+        dxsRounded = Math.round(Math.max(-127, Math.min(127, dxs - 128)));
+      } else {
+        dxsRounded = Math.round(dxs);
+      }
+      dest[destIndex] = (byte) dxsRounded;
     }
     // We multiply by `alpha` here to get the quantized value back into the original range
     // to aid in calculating the corrective offset
     float dxq = Math.round(dxs) * alpha;
-    if (dest != null) {
-      dest[destIndex] = (byte) Math.round(dxs);
+    double signedByteCorrection = 0;
+    double addlCorrection = 0;
+    if (bits == 8) {
+      signedByteCorrection = Math.pow(alpha * 127.0, 2)/2.0 + alpha * alpha * 127 * dxs + alpha * 127 * minQuantile;
+    } else {
+      addlCorrection = (dx - dxq) * dxq;
     }
     // Calculate the corrective offset that needs to be applied to the score
     // in addition to the `byte * minQuantile * alpha` term in the equation
     // we add the `(dx - dxq) * dxq` term to account for the fact that the quantized value
     // will be rounded to the nearest whole number and lose some accuracy
     // Additionally, we account for the global correction of `minQuantile^2` in the equation
-    return minQuantile * (v - minQuantile / 2.0F) + (dx - dxq) * dxq;
+    //return minQuantile * (v - minQuantile / 2.0F) + (dx - dxq) * dxq + Math.pow(alpha * c, 2)/2 + alpha * alpha * c + alpha * c * minQuantile;
+    // a^2 c^2 + a^2 c x + a^2 c y + a^2 x y + 2 a c m + a m x + a m y + m^2
+    return minQuantile * (v - minQuantile / 2.0F) + addlCorrection + signedByteCorrection;
   }
 
   /**
