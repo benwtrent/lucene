@@ -73,7 +73,8 @@ import org.apache.lucene.util.Selector;
  */
 public class ScalarQuantizer {
 
-  private static final long SCORE_DOC_SHALLOW_SIZE = RamUsageEstimator.shallowSizeOf(ScoreDoc.class);
+  private static final long SCORE_DOC_SHALLOW_SIZE =
+      RamUsageEstimator.shallowSizeOf(ScoreDoc.class);
 
   public static final int DYNAMIC_QUANT_SAMPLE_SIZE = 1000;
   public static final int SCALAR_QUANTIZATION_SAMPLE_SIZE = 25_000;
@@ -81,7 +82,8 @@ public class ScalarQuantizer {
   // and also prevents humongous allocations
   static final int SCRATCH_SIZE = 20;
 
-  public static final long ramBytesRequiredToCreate(float confidenceInterval, int totalVectorCount, int dims) {
+  public static final long ramBytesRequiredToCreate(
+      float confidenceInterval, int totalVectorCount, int dims) {
     long ramBytesUsed = 0;
     // this implies a simple scan for min/max, no heap required
     if (confidenceInterval == 1f || totalVectorCount == 0) {
@@ -89,44 +91,53 @@ public class ScalarQuantizer {
     }
     // The sampling scratch state we initialize to gather the sampled vector statistics
     int samplingScratchSpaceSize = Math.min(SCRATCH_SIZE, totalVectorCount) * dims;
-    ramBytesUsed += RamUsageEstimator.alignObjectSize(
-      (long) NUM_BYTES_ARRAY_HEADER + (long) samplingScratchSpaceSize * Float.BYTES);
+    ramBytesUsed +=
+        RamUsageEstimator.alignObjectSize(
+            (long) NUM_BYTES_ARRAY_HEADER + (long) samplingScratchSpaceSize * Float.BYTES);
     // Dynamic confidence interval utilizes a different sampling rate and logic
     if (confidenceInterval == 0f) {
       // reservoir sampling of vectors
       if (totalVectorCount > DYNAMIC_QUANT_SAMPLE_SIZE) {
-        ramBytesUsed += RamUsageEstimator.alignObjectSize(
-            (long) NUM_BYTES_ARRAY_HEADER + (long) DYNAMIC_QUANT_SAMPLE_SIZE * Integer.BYTES);
+        ramBytesUsed +=
+            RamUsageEstimator.alignObjectSize(
+                (long) NUM_BYTES_ARRAY_HEADER + (long) DYNAMIC_QUANT_SAMPLE_SIZE * Integer.BYTES);
       }
       int sampledDocs = Math.min(DYNAMIC_QUANT_SAMPLE_SIZE, totalVectorCount);
-      ramBytesUsed += RamUsageEstimator.alignObjectSize(
-        (long) NUM_BYTES_ARRAY_HEADER + (long) sampledDocs * dims * Float.BYTES);
+      ramBytesUsed +=
+          RamUsageEstimator.alignObjectSize(
+              (long) NUM_BYTES_ARRAY_HEADER + (long) sampledDocs * dims * Float.BYTES);
       // the candidates to search, two length 16 float arrays
-      ramBytesUsed += 2 * RamUsageEstimator.alignObjectSize(
-        (long) NUM_BYTES_ARRAY_HEADER + (long) 16 * Float.BYTES);
+      ramBytesUsed +=
+          2
+              * RamUsageEstimator.alignObjectSize(
+                  (long) NUM_BYTES_ARRAY_HEADER + (long) 16 * Float.BYTES);
       // true 10 k nearest neighbors for each sampled vector and the score variance
-      ramBytesUsed += sampledDocs * (RamUsageEstimator.alignObjectSize(
-        (long) NUM_BYTES_ARRAY_HEADER + (long) 10 * SCORE_DOC_SHALLOW_SIZE) + Float.BYTES);
+      ramBytesUsed +=
+          sampledDocs
+              * (RamUsageEstimator.alignObjectSize(
+                      (long) NUM_BYTES_ARRAY_HEADER + (long) 10 * SCORE_DOC_SHALLOW_SIZE)
+                  + Float.BYTES);
 
       // Score error correlation sizes
       // quantized query
-      ramBytesUsed += RamUsageEstimator.alignObjectSize(
-        (long) NUM_BYTES_ARRAY_HEADER + dims * Byte.BYTES);
+      ramBytesUsed +=
+          RamUsageEstimator.alignObjectSize((long) NUM_BYTES_ARRAY_HEADER + dims * Byte.BYTES);
       // quantized vector
-      ramBytesUsed += RamUsageEstimator.alignObjectSize(
-        (long) NUM_BYTES_ARRAY_HEADER + dims * Byte.BYTES);
+      ramBytesUsed +=
+          RamUsageEstimator.alignObjectSize((long) NUM_BYTES_ARRAY_HEADER + dims * Byte.BYTES);
       // Online mean & var for correlating errors
       ramBytesUsed += 2 * OnlineMeanAndVar.SHALLOW_SIZE;
       return ramBytesUsed;
     }
     // The reservoir sampling of vectors
     if (totalVectorCount > SCALAR_QUANTIZATION_SAMPLE_SIZE) {
-      ramBytesUsed += RamUsageEstimator.alignObjectSize(
-          (long) NUM_BYTES_ARRAY_HEADER + (long) SCALAR_QUANTIZATION_SAMPLE_SIZE * Integer.BYTES);
+      ramBytesUsed +=
+          RamUsageEstimator.alignObjectSize(
+              (long) NUM_BYTES_ARRAY_HEADER
+                  + (long) SCALAR_QUANTIZATION_SAMPLE_SIZE * Integer.BYTES);
     }
     return ramBytesUsed;
   }
-
 
   private final float alpha;
   private final float scale;
@@ -678,7 +689,8 @@ public class ScalarQuantizer {
   }
 
   private static class OnlineMeanAndVar {
-    private static final long SHALLOW_SIZE = RamUsageEstimator.shallowSizeOf(OnlineMeanAndVar.class);
+    private static final long SHALLOW_SIZE =
+        RamUsageEstimator.shallowSizeOf(OnlineMeanAndVar.class);
     private double mean = 0.0;
     private double var = 0.0;
     private int n = 0;
