@@ -75,7 +75,7 @@ public class ScalarQuantizer {
   // 20*dimension provides protection from extreme confidence intervals
   // and also prevents humongous allocations
   static final int SCRATCH_SIZE = 20;
-  private static final float SIGNED_CORRECTION = 127;
+  private static final float SIGNED_CORRECTION = 128;
 
   private final float alpha;
   private final float scale;
@@ -145,16 +145,17 @@ public class ScalarQuantizer {
     }
     final double addlCorrection;
     // Calculate the corrective offset that needs to be applied to the score
+    float dxq = Math.round(dxs) * alpha;
     if (bits == 8) {
       // We adjust for the linear shift due to `c`
       addlCorrection =
           Math.pow(alpha * SIGNED_CORRECTION, 2) / 2.0
               + alpha * SIGNED_CORRECTION * dxc
+              + (dx - dxq) * (dxq - SIGNED_CORRECTION * alpha)
               + alpha * SIGNED_CORRECTION * minQuantile;
     } else {
       // We multiply by `alpha` here to get the quantized value back into the original range
       // to aid in calculating the corrective offset
-      float dxq = Math.round(dxs) * alpha;
       // TODO Does this handle the sign shifting correctly?
       // we add the `(dx - dxq) * dxq` term to account for the fact that the quantized value
       // will be rounded to the nearest whole number and lose some accuracy

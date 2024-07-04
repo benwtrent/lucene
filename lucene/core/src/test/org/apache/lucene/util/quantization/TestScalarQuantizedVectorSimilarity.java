@@ -158,12 +158,17 @@ public class TestScalarQuantizedVectorSimilarity extends LuceneTestCase {
     int numVecs = 100;
 
     float[][] floats = randomFloats(numVecs, dims);
+    for (int i = 0; i < floats.length; i++) {
+      floats[i][16] += 5;
+      floats[i][64] += 2;
+      floats[i][96] -= 5;
+    }
     for (float confidenceInterval : new float[] {0.9f, 0.95f, 0.99f, (1 - 1f / (dims + 1)), 1f}) {
       float error = Math.max((100 - confidenceInterval) * 0.5f, 0.5f);
       FloatVectorValues floatVectorValues = fromFloats(floats);
       ScalarQuantizer scalarQuantizer =
           ScalarQuantizer.fromVectors(
-              floatVectorValues, confidenceInterval, floats.length, (byte) 7);
+              floatVectorValues, confidenceInterval, floats.length, (byte) 8);
       byte[][] quantized = new byte[floats.length][];
       float[] offsets =
           quantizeVectors(
