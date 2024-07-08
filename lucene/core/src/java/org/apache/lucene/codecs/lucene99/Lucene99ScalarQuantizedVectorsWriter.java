@@ -761,7 +761,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
   }
 
   static class FieldWriter extends FlatFieldVectorsWriter<float[]> {
-    private static final long SHALLOW_SIZE = shallowSizeOfInstance(FieldWriter.class);
+    static final long SHALLOW_SIZE = shallowSizeOfInstance(FieldWriter.class);
     private final List<float[]> floatVectors;
     private final FieldInfo fieldInfo;
     private final Float confidenceInterval;
@@ -839,6 +839,14 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
         size += indexingDelegate.ramBytesUsed();
       }
       if (floatVectors.size() == 0) return size;
+
+      size +=
+          ScalarQuantizer.ramBytesRequiredToCreate(
+              confidenceInterval == null
+                  ? calculateDefaultConfidenceInterval(floatVectors.get(0).length)
+                  : confidenceInterval,
+              floatVectors.size(),
+              floatVectors.get(0).length);
       return size + (long) floatVectors.size() * RamUsageEstimator.NUM_BYTES_OBJECT_REF;
     }
 

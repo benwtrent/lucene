@@ -28,6 +28,12 @@ import org.apache.lucene.tests.util.LuceneTestCase;
 
 public class TestScalarQuantizer extends LuceneTestCase {
 
+  public void testRamBytesEstimation() {
+    assertEquals(
+        0L, ScalarQuantizer.ramBytesRequiredToCreate(1, random().nextInt(1000) + 100_000, 64));
+    assertEquals(0L, ScalarQuantizer.ramBytesRequiredToCreate(random().nextFloat(), 0, 64));
+  }
+
   public void testTinyVectors() throws IOException {
     for (VectorSimilarityFunction function : VectorSimilarityFunction.values()) {
       int dims = random().nextInt(9) + 1;
