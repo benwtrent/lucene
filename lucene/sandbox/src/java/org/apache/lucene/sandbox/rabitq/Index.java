@@ -14,10 +14,10 @@ public class Index {
     public static void main(String[] args) throws Exception {
         // FIXME: FUTURE - allow the output path to be settable
         // index DIRECTORY_TO_DATASET DATASET_NAME NUM_CENTROIDS DIMENSIONS
-        String source = args[0];
-        String dataset = args[1];
-        int numCentroids = Integer.parseInt(args[2]);
-        int dimensions = Integer.parseInt(args[3]);
+        String source ="/Users/benjamintrent/rabit_data/";
+        String dataset = "quora-522k-e5small_corpus-quora-E5-small";
+        int numCentroids = 1;// Integer.parseInt(args[2]);
+        int dimensions = 384;// Integer.parseInt(args[3]);
 
         // FIXME: FUTURE - switch these to log statements
         System.out.println("Clustering - " + dataset);
@@ -32,7 +32,7 @@ public class Index {
         int B = (dimensions + 63) / 64 * 64;
 
         // FIXME: FUTURE - clean up this gross path mgmt
-        String dataPath = String.format("%s%s_base.fvecs", source, dataset);
+        String dataPath = String.format("%s%s.fvec", source, dataset);
         float[][] X = IOUtils.readFvecs(new FileInputStream(dataPath));
 
         String centroidPath = String.format("%sRandCentroid_C%d_B%d.fvecs", source, numCentroids, B);
@@ -60,7 +60,7 @@ public class Index {
 
     public static void clusterWithIVF(String source, String dataset, int numCentroids) throws IOException {
         Path basePath = Paths.get(source);
-        Path fvecPath = Paths.get(basePath.toString(), dataset + "_base.fvecs");
+        Path fvecPath = Paths.get(basePath.toString(), dataset + ".fvec");
 
         float[][] X = IOUtils.readFvecs(new FileInputStream(fvecPath.toFile())); // X
         Path centroidsPath = Paths.get(basePath.toString(), dataset + "_centroid_" + numCentroids + ".fvecs");
@@ -94,7 +94,7 @@ public class Index {
 
         // FIXME: FUTURE - support processing multiple datasets
 //        for (String dataset : datasets) {
-        String dataPath = new File(path, dataset + "_base.fvecs").getAbsolutePath();
+        String dataPath = new File(path, dataset + ".fvec").getAbsolutePath();
 
         String centroidsPath = new File(path, dataset + "_centroid_" + numCentroids + ".fvecs").getAbsolutePath();
         String clusterIdPath = new File(path, dataset + "_cluster_id_" + numCentroids + ".ivecs").getAbsolutePath();
@@ -130,11 +130,10 @@ public class Index {
         float[][] XPSubset = MatrixUtils.subset(XP2, B);
         boolean[][] binXPSubset = MatrixUtils.subset(binXP, B);
         float[][] binXPSubsetAsInts = MatrixUtils.asFloats(binXPSubset);
-        float[][] XPSubsetDotbinXP = MatrixUtils.multiplyElementWise(XPSubset, binXPSubsetAsInts);
-        float[][] XPSubsetDotBinXpNormalized = MatrixUtils.divide(XPSubsetDotbinXP, (float) Math.pow(B, 0.5));
-        float[][] XPSubsetSummedRows = MatrixUtils.sumRows(XPSubsetDotBinXpNormalized);
-        float[][] x0 = MatrixUtils.normalize(XPSubsetSummedRows, MatrixUtils.normsForRows(XP2));
-        float[][] x0ri = MatrixUtils.replaceInfinite(x0, 0.8f);
+        MatrixUtils.multiplyElementWise(XPSubset, binXPSubsetAsInts);
+        MatrixUtils.divide(XPSubset, (float) Math.pow(B, 0.5));
+        float[][] x0ri= MatrixUtils.sumRows(XPSubset);
+        MatrixUtils.normalize(x0ri, MatrixUtils.normsForRows(XP2), 0.8f);
 
         long[][] repackedBinXP = MatrixUtils.repackAsUInt64(binXP, B);
 

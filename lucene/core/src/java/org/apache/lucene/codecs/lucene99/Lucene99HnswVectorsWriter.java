@@ -506,7 +506,7 @@ public final class Lucene99HnswVectorsWriter extends KnnVectorsWriter {
       RandomVectorScorerSupplier scorerSupplier,
       TaskExecutor parallelMergeTaskExecutor,
       int numParallelMergeWorkers) {
-    if (mergeExec != null) {
+/*    if (mergeExec != null) {
       return new ConcurrentHnswMerger(
           fieldInfo, scorerSupplier, M, beamWidth, mergeExec, numMergeWorkers);
     }
@@ -518,7 +518,7 @@ public final class Lucene99HnswVectorsWriter extends KnnVectorsWriter {
           beamWidth,
           parallelMergeTaskExecutor,
           numParallelMergeWorkers);
-    }
+    }*/
     return new IncrementalHnswGraphMerger(fieldInfo, scorerSupplier, M, beamWidth);
   }
 

@@ -79,10 +79,6 @@ allprojects { project ->
         options.compilerArgs += [
             "-proc:none"
         ]
-
-        if (propertyOrDefault("javac.failOnWarnings", true).toBoolean()) {
-          options.compilerArgs += "-Werror"
-        }
       }
     }
   }

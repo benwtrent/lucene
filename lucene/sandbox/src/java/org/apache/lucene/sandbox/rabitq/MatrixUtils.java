@@ -23,45 +23,36 @@ public class MatrixUtils {
         return C;
     }
 
-    public static float[][] multiplyElementWise(float[][] a, float[][] b) {
-        // FIXME: FUTURE - turns out this is not dotproduct as I naively assumed; it's element by element multiplication in numpy ... validate?
-        // FIXME: FUTURE - this is part of a series of transforms (optimize by doing them all at the same time)
-
+    public static void multiplyElementWise(float[][] a, float[][] b) {
         assert a.length == b.length;
         assert a[0].length == b[0].length;
 
-        float[][] output = new float[a.length][a[0].length];
-
         for(int i = 0; i < a.length; i++) {
             for( int j = 0; j < a[0].length; j++) {
-                output[i][j] = a[i][j] * b[i][j];
+                a[i][j] *= b[i][j];
             }
         }
-
-        return output;
     }
 
-    public static float[][] divide(float[][] a, float divisor) {
-        float[][] aDivided = new float[a.length][a[0].length];
+    public static void divide(float[][] a, float divisor) {
         for(int i = 0; i < a.length; i++) {
             for(int j = 0; j < a[0].length; j++) {
-                aDivided[i][j] = a[i][j] / divisor;
+                a[i][j] /= divisor;
             }
         }
-
-        return aDivided;
     }
 
-    public static float[][] normalize(float[][] a, float[][] norms) {
-        // FIXME: FUTURE - throw errors here for norms being the incorrect or unexpected shape
-        float[][] aDivided = new float[a.length][a[0].length];
+    public static void normalize(float[][] a, float[][] norms, float infReplacement) {
         for(int i = 0; i < a.length; i++) {
             for(int j = 0; j < a[0].length; j++) {
-                aDivided[i][j] = a[i][j] / norms[i][0];
+                float v = a[i][j] / norms[i][0];
+                if (!Float.isFinite(v)) {
+                    a[i][j] = infReplacement;
+                } else {
+                    a[i][j] = v;
+                }
             }
         }
-
-        return aDivided;
     }
 
     public static float distance(float[][] a, int startA, float[][] b, int startB) {

@@ -1,6 +1,6 @@
 package org.apache.lucene.sandbox.rabitq;
 
-public record Result(float sqrY, int c) implements Comparable {
+public record Result(float sqrY, int c) implements Comparable<Object> {
     @Override
     public int compareTo(Object obj) {
         if(obj instanceof Result) {

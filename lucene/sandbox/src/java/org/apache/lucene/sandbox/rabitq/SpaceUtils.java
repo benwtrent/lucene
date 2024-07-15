@@ -1,6 +1,9 @@
 package org.apache.lucene.sandbox.rabitq;
 
+import org.apache.lucene.util.BitUtil;
+
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class SpaceUtils {
 
@@ -13,18 +16,46 @@ public class SpaceUtils {
     }
 
     public static long ipByteBin(long[] q, long[] d, int B_QUERY, int B) {
-        long ret = 0;
+        assert q.length >= d.length * B_QUERY;
+        if (B_QUERY == 1) {
+            long ret = 0;
+            for (int i = 0; i < d.length; i++) {
+                ret += Long.bitCount(q[i] & d[i]);
+            }
+            return ret;
+        }
+        int ret = 0;
         for (int i = 0; i < B_QUERY; i++) {
-            long subRet = 0;
-            for (int j = 0; j < B / 64; j++) {
-                subRet += Long.bitCount(q[i*(B / 64)+j] & d[j]);
+            int subRet = 0;
+            for (int j = 0; j < d.length; j++) {
+                subRet += Long.bitCount(q[i*d.length+j] & d[j]);
             }
             ret += subRet << i;
         }
         return ret;
     }
 
-    public static long[] transposeBin(byte[] q, int D, int B_QUERY) {
+    public static long ipByteBin(byte[] q, byte[] d, int B_QUERY, int B) {
+        assert q.length >= d.length * B_QUERY;
+        if (B_QUERY == 1) {
+            int ret = 0;
+            for (int i = 0; i < d.length; i += Integer.BYTES ) {
+                ret += Integer.bitCount((int) BitUtil.VH_LE_INT.get(q, i) & (int) BitUtil.VH_LE_INT.get(d, i));
+            }
+            return ret;
+        }
+        int ret = 0;
+        for (int i = 0; i < B_QUERY; i++) {
+            int subRet = 0;
+            for (int j = 0; j < d.length; j += Integer.BYTES) {
+                subRet += Integer.bitCount((int) BitUtil.VH_LE_INT.get(q, i*d.length+j) & (int) BitUtil.VH_LE_INT.get(d, j));
+            }
+            ret += subRet << i;
+        }
+        return ret;
+    }
+
+    public static byte[] transposeBin(byte[] q, int D, int B_QUERY) {
         // FIXME: FUTURE - verify B_QUERY > 0
         assert B_QUERY > 0;
 
@@ -78,8 +109,12 @@ public class SpaceUtils {
             }
             qOffset += 32;
         }
-
-        return quantQuery;
+        ByteBuffer buf = ByteBuffer.allocate(quantQuery.length * 8);
+        buf.order(ByteOrder.LITTLE_ENDIAN);
+        for(int i = 0; i < quantQuery.length; i++) {
+            buf.putLong(quantQuery[i]);
+        }
+        return buf.array();
     }
 
     private static long moveMaskEpi8(byte[] v) {
