@@ -41,7 +41,7 @@ public class Search {
     boolean doHnsw = false;
     int maxConns = 16;
     int beamWidth = 100;
-    if (args.length > 7) {
+    if (args.length > 6) {
       doHnsw = Boolean.parseBoolean(args[6]);
       if (args.length > 8) {
         maxConns = Integer.parseInt(args[7]);
@@ -80,6 +80,12 @@ public class Search {
             "Graph build time: " + TimeUnit.NANOSECONDS.toMillis(graphBuildTime) + " ms");
         testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, 300);
       } else {
+        test(queryVectors, dataVectors, G, ivfrn, k);
+        System.out.println("------------------------------------------------");
+        test(queryVectors, dataVectors, G, ivfrn, k);
+        System.out.println("------------------------------------------------");
+        test(queryVectors, dataVectors, G, ivfrn, k);
+        System.out.println("------------------------------------------------");
         test(queryVectors, dataVectors, G, ivfrn, k);
       }
     }

@@ -367,7 +367,7 @@ public class IVFRN {
 
     // FIXME: FUTURE - don't use the Result class for this; it's confusing
     // FIXME: FUTURE - hardcoded
-    int maxEstimatorSize = 500;
+    int maxEstimatorSize = 100;
     PriorityQueue<Result> estimatorDistances =
         new PriorityQueue<>(maxEstimatorSize, Comparator.reverseOrder());
 
@@ -402,7 +402,7 @@ public class IVFRN {
       int bCounter = startC;
 
       for (int i = 0; i < len[c]; i++) {
-        long qcDist = SpaceUtils.ipByteBinByte(quantQuery, binaryCode[bCounter], B);
+        long qcDist = SpaceUtils.ipByteBinBytePan(quantQuery, binaryCode[bCounter]);
 
         float tmpDist =
             fac[facCounter].sqrX()
@@ -429,6 +429,16 @@ public class IVFRN {
     }
 
     int size = estimatorDistances.size();
+    if (maxEstimatorSize == k) {
+      knns.addAll(estimatorDistances);
+      IVFRNStats stats =
+          new IVFRNStats(
+              maxEstimatorSize,
+              totalEstimatorQueueAdds,
+              floatingPointOps,
+              errorBoundAvg / errorBoundTotalCalcs);
+      return new IVFRNResult(knns, stats);
+    }
     for (int i = 0; i < size; i++) {
       Result res = estimatorDistances.remove();
       if (res.sqrY() < distK) {

@@ -17,20 +17,19 @@ public class SpaceUtils {
     return BitSet.valueOf(d).cardinality();
   }
 
-  public static long ipByteBinByte(byte[] q, byte[] d, int B) {
+  public static long ipByteBinByte(byte[] q, byte[] d) {
     long ret = 0;
-    int size = B / 8;
     for (int i = 0; i < B_QUERY; i++) {
       int r = 0;
       long subRet = 0;
       for (final int upperBound = d.length & -Integer.BYTES; r < upperBound; r += Integer.BYTES) {
         subRet +=
             Integer.bitCount(
-                (int) BitUtil.VH_NATIVE_INT.get(q, i * size + r)
+                (int) BitUtil.VH_NATIVE_INT.get(q, i * d.length + r)
                     & (int) BitUtil.VH_NATIVE_INT.get(d, r));
       }
       for (; r < d.length; r++) {
-        subRet += Integer.bitCount((q[i * size + r] & d[i]) & 0xFF);
+        subRet += Integer.bitCount((q[i * d.length + r] & d[i]) & 0xFF);
       }
       ret += subRet << i;
     }
@@ -48,7 +47,7 @@ public class SpaceUtils {
         ByteVector vd = ByteVector.fromArray(BYTE_SPECIES, d, offset);
         ByteVector vres = vq.and(vd);
         vres = vres.lanewise(VectorOperators.BIT_COUNT);
-        subRet += vres.reduceLanes(VectorOperators.ADD); // subRet += byteMap.get(estimatedDist)
+        subRet += vres.reduceLanes(VectorOperators.ADD);
       }
       ret += subRet << i;
     }
