@@ -228,9 +228,21 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     if (fieldInfo.getVectorEncoding().equals(VectorEncoding.FLOAT32)) {
       ScalarQuantizer mergedQuantizationState =
           mergeAndRecalculateQuantiles(mergeState, fieldInfo, confidenceInterval, bits);
+      if (segmentWriteState.infoStream.isEnabled(QUANTIZED_VECTOR_COMPONENT)) {
+        segmentWriteState.infoStream.message(
+            QUANTIZED_VECTOR_COMPONENT,
+            "merged quantized field="
+                + fieldInfo.name
+                + " confidenceInterval="
+                + confidenceInterval
+                + " minQuantile="
+                + mergedQuantizationState.getLowerQuantile()
+                + " maxQuantile="
+                + mergedQuantizationState.getUpperQuantile());
+      }
       MergedQuantizedVectorValues byteVectorValues =
           MergedQuantizedVectorValues.mergeQuantizedByteVectorValues(
-              fieldInfo, mergeState, mergedQuantizationState);
+              fieldInfo, mergeState, mergedQuantizationState, segmentWriteState);
       long vectorDataOffset = quantizedVectorData.alignFilePointer(Float.BYTES);
       DocsWithFieldSet docsWithField =
           writeQuantizedVectorData(quantizedVectorData, byteVectorValues, bits, compress);
@@ -467,7 +479,8 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     if (segmentWriteState.infoStream.isEnabled(QUANTIZED_VECTOR_COMPONENT)) {
       segmentWriteState.infoStream.message(
           QUANTIZED_VECTOR_COMPONENT,
-          "quantized field="
+          "merged quantized field="
+              + fieldInfo.name
               + " confidenceInterval="
               + confidenceInterval
               + " minQuantile="
@@ -484,7 +497,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     try {
       MergedQuantizedVectorValues byteVectorValues =
           MergedQuantizedVectorValues.mergeQuantizedByteVectorValues(
-              fieldInfo, mergeState, mergedQuantizationState);
+              fieldInfo, mergeState, mergedQuantizationState, segmentWriteState);
       DocsWithFieldSet docsWithField =
           writeQuantizedVectorData(tempQuantizedVectorData, byteVectorValues, bits, compress);
       CodecUtil.writeFooter(tempQuantizedVectorData);
@@ -703,7 +716,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     float tol =
         REQUANTIZATION_LIMIT
             * (newQuantiles.getUpperQuantile() - newQuantiles.getLowerQuantile())
-            / 128f;
+            / ((1 << existingQuantiles.getBits()) - 1);
     if (Math.abs(existingQuantiles.getUpperQuantile() - newQuantiles.getUpperQuantile()) > tol) {
       return true;
     }
@@ -795,6 +808,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
       assert flatFieldVectorsWriter.isFinished();
       List<float[]> floatVectors = flatFieldVectorsWriter.getVectors();
       if (floatVectors.size() == 0) {
+        infoStream.message(QUANTIZED_VECTOR_COMPONENT, "EMPTY");
         return new ScalarQuantizer(0, 0, bits);
       }
       FloatVectorValues floatVectorValues = new FloatVectorWrapper(floatVectors, normalize);
@@ -809,6 +823,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
         infoStream.message(
             QUANTIZED_VECTOR_COMPONENT,
             "quantized field="
+                + fieldInfo.name
                 + " confidenceInterval="
                 + confidenceInterval
                 + " bits="
@@ -928,7 +943,10 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
   /** Returns a merged view over all the segment's {@link QuantizedByteVectorValues}. */
   static class MergedQuantizedVectorValues extends QuantizedByteVectorValues {
     public static MergedQuantizedVectorValues mergeQuantizedByteVectorValues(
-        FieldInfo fieldInfo, MergeState mergeState, ScalarQuantizer scalarQuantizer)
+        FieldInfo fieldInfo,
+        MergeState mergeState,
+        ScalarQuantizer scalarQuantizer,
+        SegmentWriteState segmentWriteState)
         throws IOException {
       assert fieldInfo != null && fieldInfo.hasVectorValues();
 
@@ -949,6 +967,30 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
               // quantization?
               || scalarQuantizer.getBits() <= 4
               || shouldRequantize(reader.getQuantizationState(fieldInfo.name), scalarQuantizer)) {
+            if (segmentWriteState.infoStream.isEnabled(QUANTIZED_VECTOR_COMPONENT)) {
+              ScalarQuantizer oldQuantizationState =
+                  reader != null && reader.getQuantizationState(fieldInfo.name) != null
+                      ? reader.getQuantizationState(fieldInfo.name)
+                      : null;
+              segmentWriteState.infoStream.message(
+                  QUANTIZED_VECTOR_COMPONENT,
+                  "requantizing merged quantized field="
+                      + fieldInfo.name
+                      + " docCount="
+                      + mergeState.maxDocs[i]
+                      + " minQuantile="
+                      + scalarQuantizer.getLowerQuantile()
+                      + " maxQuantile="
+                      + scalarQuantizer.getUpperQuantile()
+                      + " oldMinQuantile="
+                      + (oldQuantizationState != null
+                          ? oldQuantizationState.getLowerQuantile()
+                          : "null")
+                      + " oldMaxQuantile="
+                      + (oldQuantizationState != null
+                          ? oldQuantizationState.getUpperQuantile()
+                          : "null"));
+            }
             sub =
                 new QuantizedByteVectorValueSub(
                     mergeState.docMaps[i],
@@ -957,6 +999,22 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
                         fieldInfo.getVectorSimilarityFunction(),
                         scalarQuantizer));
           } else {
+            if (segmentWriteState.infoStream.isEnabled(QUANTIZED_VECTOR_COMPONENT)) {
+              segmentWriteState.infoStream.message(
+                  QUANTIZED_VECTOR_COMPONENT,
+                  "not requantizing but re-calculating correction merged quantized field="
+                      + fieldInfo.name
+                      + " docCount="
+                      + mergeState.maxDocs[i]
+                      + " minQuantile="
+                      + scalarQuantizer.getLowerQuantile()
+                      + " maxQuantile="
+                      + scalarQuantizer.getUpperQuantile()
+                      + " oldMinQuantile="
+                      + reader.getQuantizationState(fieldInfo.name).getLowerQuantile()
+                      + " oldMaxQuantile="
+                      + reader.getQuantizationState(fieldInfo.name).getUpperQuantile());
+            }
             sub =
                 new QuantizedByteVectorValueSub(
                     mergeState.docMaps[i],

@@ -181,13 +181,17 @@ public class ScalarQuantizer {
     if (similarityFunction.equals(VectorSimilarityFunction.EUCLIDEAN)) {
       return 0f;
     }
-    float correctiveOffset = 0f;
+    double correctiveOffset = 0f;
     for (int i = 0; i < quantizedVector.length; i++) {
       // dequantize the old value in order to recalculate the corrective offset
-      float v = (oldQuantizer.alpha * quantizedVector[i]) + oldQuantizer.minQuantile;
+      int quantizedValue = quantizedVector[i];
+      if (oldQuantizer.getBits() == 8) {
+        quantizedValue += SIGNED_CORRECTION;
+      }
+      float v = (oldQuantizer.alpha * quantizedValue) + oldQuantizer.minQuantile;
       correctiveOffset += quantizeFloat(v, null, 0);
     }
-    return correctiveOffset;
+    return (float) correctiveOffset;
   }
 
   /**
