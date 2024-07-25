@@ -128,6 +128,22 @@ public class MatrixUtils {
     return result;
   }
 
+  public static float[] dotProduct(float[] a, float[][] b) {
+    int n = a.length;
+    int bN = b[0].length;
+    if (n != b.length) {
+      throw new IllegalArgumentException("Matrices are not compatible for dot product");
+    }
+    // FIXME: consider loading the column into an array and running panama and evaluate the cost
+    float[] result = new float[bN];
+      for (int j = 0; j < bN; j++) {
+        for (int k = 0; k < n; k++) {
+          result[j] = Math.fma(a[k], b[k][j], result[j]);
+        }
+      }
+    return result;
+  }
+
   public static float[][] dotProduct(float[][] a, float[][] b) {
     int m = a.length;
     int n = a[0].length;

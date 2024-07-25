@@ -1,6 +1,11 @@
 package org.apache.lucene.sandbox.rabitq;
 
-public record Result(float sqrY, int c) implements Comparable {
+public record Result(float sqrY, int c, Long originalCDist) implements Comparable {
+
+  public Result(float sqrY, int c) {
+    this(sqrY, c, null);
+  }
+
   @Override
   public int compareTo(Object obj) {
     if (obj instanceof Result) {
@@ -36,6 +41,6 @@ public record Result(float sqrY, int c) implements Comparable {
 
   @Override
   public String toString() {
-    return this.sqrY + ":" + this.c;
+    return this.sqrY + ":" + this.c + (originalCDist != null ? ":" + originalCDist : "");
   }
 }

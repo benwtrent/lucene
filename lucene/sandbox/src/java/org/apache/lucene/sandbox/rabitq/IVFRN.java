@@ -8,9 +8,15 @@ import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.PriorityQueue;
 import java.util.Random;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
+import org.apache.lucene.util.quantization.ScalarQuantizer;
 
 public class IVFRN {
   private Factor[] fac;
@@ -346,13 +352,16 @@ public class IVFRN {
   }
 
   public IVFRNResult search(
-      RandomAccessVectorValues.Floats dataVectors, float[] query, int k, int nProbe)
+      RandomAccessVectorValues.Floats dataVectors,
+      float[] query,
+      int k,
+      int nProbe,
+      VectorSimilarityFunction similarityFunction)
       throws IOException {
     // FIXME: FUTURE - implement fast scan and do a comparison
 
     assert nProbe < C;
-    float distK = Float.MAX_VALUE;
-    PriorityQueue<Result> knns = new PriorityQueue<>(k, Comparator.reverseOrder());
+    PriorityQueue<Result> knns = new PriorityQueue<>(k);
 
     // Find out the nearest N_{probe} centroids to the query vector.
     PriorityQueue<Result> topNProbeCentroids = new PriorityQueue<>(nProbe);
@@ -367,9 +376,8 @@ public class IVFRN {
 
     // FIXME: FUTURE - don't use the Result class for this; it's confusing
     // FIXME: FUTURE - hardcoded
-    int maxEstimatorSize = 100;
-    PriorityQueue<Result> estimatorDistances =
-        new PriorityQueue<>(maxEstimatorSize, Comparator.reverseOrder());
+    int maxEstimatorSize = 50;
+    PriorityQueue<Result> estimatorDistances = new PriorityQueue<>(maxEstimatorSize, Comparator.reverseOrder());
 
     float errorBoundAvg = 0f;
     int errorBoundTotalCalcs = 0;
@@ -403,22 +411,23 @@ public class IVFRN {
 
       for (int i = 0; i < len[c]; i++) {
         long qcDist = SpaceUtils.ipByteBinBytePan(quantQuery, binaryCode[bCounter]);
+        Factor factor = fac[facCounter];
 
         float tmpDist =
-            fac[facCounter].sqrX()
+          factor.sqrX()
                 + sqrY
-                + fac[facCounter].factorPPC() * vl
-                + (qcDist * 2 - sumQ) * fac[facCounter].factorIP() * width;
-        float errorBound = y * (fac[facCounter].error());
+                + factor.factorPPC() * vl
+                + (qcDist * 2 - sumQ) * factor.factorIP() * width;
+        float errorBound = y * factor.error();
         float estimator = tmpDist - errorBound;
 
         if (estimatorDistances.size() < maxEstimatorSize) {
           totalEstimatorQueueAdds++;
-          estimatorDistances.add(new Result(estimator, startC + i));
+          estimatorDistances.add(new Result(estimator, startC + i, qcDist));
         } else if (estimator < estimatorDistances.peek().sqrY()) {
           totalEstimatorQueueAdds++;
           estimatorDistances.poll();
-          estimatorDistances.add(new Result(estimator, startC + i));
+          estimatorDistances.add(new Result(estimator, startC + i, qcDist));
         }
 
         errorBoundAvg += errorBound;
@@ -440,20 +449,15 @@ public class IVFRN {
       return new IVFRNResult(knns, stats);
     }
     for (int i = 0; i < size; i++) {
-      Result res = estimatorDistances.remove();
-      if (res.sqrY() < distK) {
-        floatingPointOps++;
-        float gt_dist =
-            VectorUtils.squareDistance(dataVectors.vectorValue(dataMapping[res.c()]), query);
-        if (gt_dist < distK) {
-          knns.add(new Result(gt_dist, id[res.c()]));
-          if (knns.size() > k) {
-            knns.remove();
-          }
-          if (knns.size() == k) {
-            distK = knns.peek().sqrY();
-          }
-        }
+      Result res = estimatorDistances.poll();
+      floatingPointOps++;
+      int vectorId = dataMapping[res.c()];
+      float gt_dist = similarityFunction.compare(query, dataVectors.vectorValue(vectorId));
+      if (knns.size() < k) {
+        knns.add(new Result(gt_dist, id[res.c()]));
+      } else if (knns.peek().sqrY() < gt_dist) {
+        knns.poll();
+        knns.add(new Result(gt_dist, id[res.c()]));
       }
     }
 

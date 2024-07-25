@@ -31,7 +31,7 @@ public class Index {
     try (MMapDirectory directory = new MMapDirectory(basePath);
         IndexInput vectorInput = directory.openInput(fvecPath.toString(), IOContext.DEFAULT)) {
       RandomAccessVectorValues.Floats vectorValues =
-          new VectorsReaderWithOffset(vectorInput, numDocs, dimensions);
+          new VectorsReaderWithOffset(vectorInput, numDocs, dimensions, Float.BYTES);
       System.out.println("Clustering - " + dataset);
       long startTime = System.nanoTime();
       IVFOutput ivfOutput = clusterWithIVF(vectorValues, numCentroids, dimensions);
