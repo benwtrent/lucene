@@ -354,6 +354,7 @@ public class IVFRN {
   public IVFRNResult search(
       RandomAccessVectorValues.Floats dataVectors,
       float[] query,
+      int[] trueIds,
       int k,
       int nProbe,
       VectorSimilarityFunction similarityFunction)
@@ -376,9 +377,10 @@ public class IVFRN {
 
     // FIXME: FUTURE - don't use the Result class for this; it's confusing
     // FIXME: FUTURE - hardcoded
-    int maxEstimatorSize = 50;
+    int maxEstimatorSize = 100;
     PriorityQueue<Result> estimatorDistances = new PriorityQueue<>(maxEstimatorSize, Comparator.reverseOrder());
-
+    float[] estimatedTrueDistances = new float[k];
+    float[] trueDistances = new float[k];
     float errorBoundAvg = 0f;
     int errorBoundTotalCalcs = 0;
     int totalEstimatorQueueAdds = 0;
@@ -435,6 +437,21 @@ public class IVFRN {
         bCounter++;
         facCounter++;
       }
+
+      for (int i = 0; i < k; i++) {
+        int vectorId = trueIds[i];
+        trueDistances[i] = similarityFunction.compare(query, dataVectors.vectorValue(trueIds[i]));
+        long qcDist = SpaceUtils.ipByteBinBytePan(quantQuery, binaryCode[vectorId]);
+        Factor factor = fac[vectorId];
+
+        float tmpDist =
+          factor.sqrX()
+            + sqrY
+            + factor.factorPPC() * vl
+            + (qcDist * 2 - sumQ) * factor.factorIP() * width;
+        float errorBound = y * factor.error();
+        estimatedTrueDistances[i] = tmpDist - errorBound;
+      }
     }
 
     int size = estimatorDistances.size();
@@ -448,8 +465,12 @@ public class IVFRN {
               errorBoundAvg / errorBoundTotalCalcs);
       return new IVFRNResult(knns, stats);
     }
+    float[] estimators = new float[size];
+    int[] estimatedNeighbors = new int[size];
     for (int i = 0; i < size; i++) {
       Result res = estimatorDistances.poll();
+      estimators[i] = res.sqrY();
+      estimatedNeighbors[i] = res.c();
       floatingPointOps++;
       int vectorId = dataMapping[res.c()];
       float gt_dist = similarityFunction.compare(query, dataVectors.vectorValue(vectorId));

@@ -18,6 +18,7 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.PrintStreamInfoStream;
+import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.HnswGraphBuilder;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.NeighborQueue;
@@ -57,7 +58,7 @@ public class Search {
 
     String queryPath = String.format("%s%s_query.fvecs", source, dataset);
     String dataPath = String.format("%s%s_base.fvecs", source, dataset);
-    String groundTruthPath = String.format("%s%s_mip_groundtruth.fvecs", source, dataset);
+    String groundTruthPath = String.format("%s%s_groundtruth.fvecs", source, dataset);
     String indexPath = String.format("%sivfrabitq%d_B%d.index", source, numCentroids, B);
     IVFRN ivfrn = IVFRN.load(indexPath);
     System.out.println("Loaded IVFRN index with size: " + ivfrn.getN());
@@ -232,7 +233,7 @@ public class Search {
     for (int i = 0; i < queryVectors.size(); i++) {
       long startTime = System.nanoTime();
       float[] queryVector = queryVectors.vectorValue(i);
-      IVFRNResult result = ivf.search(dataVectors, queryVector, k, nprobes, vectorFunction);
+      IVFRNResult result = ivf.search(dataVectors, queryVector, G[i], k, nprobes, vectorFunction);
       PriorityQueue<Result> KNNs = result.results();
       IVFRNStats stats = result.stats();
       float usertime =

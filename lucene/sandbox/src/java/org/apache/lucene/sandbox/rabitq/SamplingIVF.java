@@ -2,10 +2,12 @@ package org.apache.lucene.sandbox.rabitq;
 
 import java.io.IOException;
 import java.util.Arrays;
+
+import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 public class SamplingIVF {
-  private static final int seed = 1;
+  private static final int seed = 42;
 
   private final int totalClusters;
   private Centroid[] centroids;
