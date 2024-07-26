@@ -716,7 +716,7 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
     float tol =
         REQUANTIZATION_LIMIT
             * (newQuantiles.getUpperQuantile() - newQuantiles.getLowerQuantile())
-            / ((1 << existingQuantiles.getBits()) - 1);
+            / 128f;
     if (Math.abs(existingQuantiles.getUpperQuantile() - newQuantiles.getUpperQuantile()) > tol) {
       return true;
     }
@@ -808,7 +808,6 @@ public final class Lucene99ScalarQuantizedVectorsWriter extends FlatVectorsWrite
       assert flatFieldVectorsWriter.isFinished();
       List<float[]> floatVectors = flatFieldVectorsWriter.getVectors();
       if (floatVectors.size() == 0) {
-        infoStream.message(QUANTIZED_VECTOR_COMPONENT, "EMPTY");
         return new ScalarQuantizer(0, 0, bits);
       }
       FloatVectorValues floatVectorValues = new FloatVectorWrapper(floatVectors, normalize);

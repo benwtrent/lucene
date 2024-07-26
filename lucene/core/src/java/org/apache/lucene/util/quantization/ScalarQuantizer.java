@@ -32,20 +32,21 @@ import org.apache.lucene.util.IntroSelector;
 import org.apache.lucene.util.Selector;
 
 /**
- * Will scalar quantize float vectors into `int8` byte values. This is a lossy transformation.
- * Scalar quantization works by first calculating the quantiles of the float vector values. The
- * quantiles are calculated using the configured confidence interval. The [minQuantile, maxQuantile]
- * are then used to scale the values into the range [0, 127] and bucketed into the nearest byte
- * values.
+ * Will scalar quantize float vectors into byte values. This is a lossy transformation. Scalar
+ * quantization works by first calculating the quantiles of the float vector values. The quantiles
+ * are calculated using the configured confidence interval. The [minQuantile, maxQuantile] are then
+ * used to scale the values into the possible ranges [0,15], [0, 127], [-127, 127] for bits 4, 7,
+ * and 8 respectively
  *
  * <h2>How Scalar Quantization Works</h2>
  *
  * <p>The basic mathematical equations behind this are fairly straight forward and based on min/max
  * normalization. Given a float vector `v` and a confidenceInterval `q` we can calculate the
- * quantiles of the vector values [minQuantile, maxQuantile].
+ * quantiles of the vector values [minQuantile, maxQuantile]. Note, the following examples assume 7
+ * bits.
  *
  * <pre class="prettyprint">
- *   byte = (float - minQuantile) * 255/(maxQuantile - minQuantile)
+ *   byte = (float - minQuantile) * 127/(maxQuantile - minQuantile)
  *   float = (maxQuantile - minQuantile)/127 * byte + minQuantile
  * </pre>
  *
@@ -75,6 +76,7 @@ public class ScalarQuantizer {
   // 20*dimension provides protection from extreme confidence intervals
   // and also prevents humongous allocations
   static final int SCRATCH_SIZE = 20;
+  // When quantizing with 8 bits, this is used for signed byte linear correction.
   private static final float SIGNED_CORRECTION = 128;
 
   private final float alpha;
