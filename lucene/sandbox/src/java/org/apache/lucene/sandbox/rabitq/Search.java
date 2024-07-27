@@ -58,7 +58,7 @@ public class Search {
 
     String queryPath = String.format("%s%s_query.fvecs", source, dataset);
     String dataPath = String.format("%s%s_base.fvecs", source, dataset);
-    String groundTruthPath = String.format("%s%s_groundtruth.fvecs", source, dataset);
+    String groundTruthPath = String.format("%s%s_mip_groundtruth.fvecs", source, dataset);
     String indexPath = String.format("%sivfrabitq%d_B%d.index", source, numCentroids, B);
     IVFRN ivfrn = IVFRN.load(indexPath);
     System.out.println("Loaded IVFRN index with size: " + ivfrn.getN());
