@@ -7,7 +7,6 @@ import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 import org.apache.lucene.util.BitUtil;
 
-
 public class SpaceUtils {
 
   private static final VectorSpecies<Byte> BYTE_SPECIES = ByteVector.SPECIES_PREFERRED;
@@ -96,7 +95,6 @@ public class SpaceUtils {
 
       for (int j = 0; j < B_QUERY; j++) {
         long v1 = moveMaskEpi8(v);
-        // v1 = reverseBits(v1); // our move mask does this operation for us
         quantQuery[(B_QUERY - j - 1) * (B / 64) + i / 64] |= (v1 << ((i / 32 % 2 == 0) ? 32 : 0));
 
         for (int k = 0; k < v.length; k += 4) {

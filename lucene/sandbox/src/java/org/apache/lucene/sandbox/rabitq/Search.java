@@ -18,7 +18,6 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.PrintStreamInfoStream;
-import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.HnswGraphBuilder;
 import org.apache.lucene.util.hnsw.HnswGraphSearcher;
 import org.apache.lucene.util.hnsw.NeighborQueue;
@@ -233,7 +232,7 @@ public class Search {
     for (int i = 0; i < queryVectors.size(); i++) {
       long startTime = System.nanoTime();
       float[] queryVector = queryVectors.vectorValue(i);
-      IVFRNResult result = ivf.search(dataVectors, queryVector, G[i], k, nprobes, vectorFunction);
+      IVFRNResult result = ivf.search(dataVectors, i, queryVector, G[i], k, nprobes, vectorFunction);
       PriorityQueue<Result> KNNs = result.results();
       IVFRNStats stats = result.stats();
       float usertime =

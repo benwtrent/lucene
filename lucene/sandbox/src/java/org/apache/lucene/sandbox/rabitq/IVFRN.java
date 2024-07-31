@@ -8,15 +8,11 @@ import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.PriorityQueue;
 import java.util.Random;
-import java.util.Set;
-import java.util.stream.Collectors;
-
 import org.apache.lucene.index.VectorSimilarityFunction;
+import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
-import org.apache.lucene.util.quantization.ScalarQuantizer;
 
 public class IVFRN {
   private Factor[] fac;
@@ -353,6 +349,7 @@ public class IVFRN {
 
   public IVFRNResult search(
       RandomAccessVectorValues.Floats dataVectors,
+      int queryId,
       float[] query,
       int[] trueIds,
       int k,
@@ -378,7 +375,8 @@ public class IVFRN {
     // FIXME: FUTURE - don't use the Result class for this; it's confusing
     // FIXME: FUTURE - hardcoded
     int maxEstimatorSize = 100;
-    PriorityQueue<Result> estimatorDistances = new PriorityQueue<>(maxEstimatorSize, Comparator.reverseOrder());
+    PriorityQueue<Result> estimatorDistances =
+        new PriorityQueue<>(maxEstimatorSize, Comparator.reverseOrder());
     float[] estimatedTrueDistances = new float[k];
     float[] trueDistances = new float[k];
     float errorBoundAvg = 0f;
@@ -404,6 +402,22 @@ public class IVFRN {
 
       // Binary String Representation
       byte[] quantQuery = SpaceUtils.transposeBin(byteQuery, D);
+      //print byte query an quant query
+      System.out.println("byte query: " + Arrays.toString(byteQuery));
+      System.out.println("quant query: " + Arrays.toString(quantQuery));
+      // print the binary representation byteQuery and quantQuery
+      StringBuilder sb = new StringBuilder();
+      for (byte b : byteQuery) {
+        sb.append(String.format("%4s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0'));
+        sb.append(" ");
+      }
+      System.out.println("byte query binary: " + sb.toString());
+      sb = new StringBuilder();
+      for (byte b : quantQuery) {
+        sb.append(String.format("%8s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0'));
+        sb.append(" ");
+      }
+      System.out.println("quant query binary: " + sb.toString());
 
       int startC = start[c];
       float y = (float) Math.sqrt(sqrY);
@@ -416,7 +430,7 @@ public class IVFRN {
         Factor factor = fac[facCounter];
 
         float tmpDist =
-          factor.sqrX()
+            factor.sqrX()
                 + sqrY
                 + factor.factorPPC() * vl
                 + (qcDist * 2 - sumQ) * factor.factorIP() * width;
@@ -445,10 +459,10 @@ public class IVFRN {
         Factor factor = fac[vectorId];
 
         float tmpDist =
-          factor.sqrX()
-            + sqrY
-            + factor.factorPPC() * vl
-            + (qcDist * 2 - sumQ) * factor.factorIP() * width;
+            factor.sqrX()
+                + sqrY
+                + factor.factorPPC() * vl
+                + (qcDist * 2 - sumQ) * factor.factorIP() * width;
         float errorBound = y * factor.error();
         estimatedTrueDistances[i] = tmpDist - errorBound;
       }

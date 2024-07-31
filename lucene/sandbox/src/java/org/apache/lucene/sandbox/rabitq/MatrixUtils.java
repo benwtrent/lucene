@@ -24,8 +24,8 @@ public class MatrixUtils {
 
     // tail
     int remainder = a.length % FLOAT_SPECIES.length();
-    if(remainder != 0) {
-      for(int i = a.length-remainder; i < a.length; i++) {
+    if (remainder != 0) {
+      for (int i = a.length - remainder; i < a.length; i++) {
         a[i] = Math.abs(a[i]) / divisor;
       }
     }
@@ -34,7 +34,7 @@ public class MatrixUtils {
   public static float partialSumAndNormalize(float[] a, float norm) {
     float aDivided = 0f;
 
-    for(int i = 0; i < a.length; i++) {
+    for (int i = 0; i < a.length; i++) {
       aDivided += a[i];
     }
 
@@ -135,8 +135,8 @@ public class MatrixUtils {
 
     // tail
     int remainder = vector.length % FLOAT_SPECIES.length();
-    if(remainder != 0) {
-      for(int i = vector.length-remainder; i < vector.length; i++) {
+    if (remainder != 0) {
+      for (int i = vector.length - remainder; i < vector.length; i++) {
         magnitude = Math.fma(vector[i], vector[i], magnitude);
       }
     }

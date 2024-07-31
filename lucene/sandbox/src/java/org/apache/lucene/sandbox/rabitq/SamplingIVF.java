@@ -2,8 +2,6 @@ package org.apache.lucene.sandbox.rabitq;
 
 import java.io.IOException;
 import java.util.Arrays;
-
-import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 
 public class SamplingIVF {
