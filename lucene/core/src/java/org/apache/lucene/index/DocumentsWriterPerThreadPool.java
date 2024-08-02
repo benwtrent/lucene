@@ -116,6 +116,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     ensureOpen();
     DocumentsWriterPerThread dwpt = freeList.lockAndPoll();
     if (dwpt != null) {
+      System.out.println("getAndLock: " + dwpt);
       return dwpt;
     }
 
@@ -123,7 +124,9 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // `freeList` at this point, it will be added later on once DocumentsWriter has indexed a
     // document into this DWPT and then gives it back to the pool by calling
     // #marksAsFreeAndUnlock.
-    return newWriter();
+    dwpt = newWriter();
+    System.out.println("new Writer: " + dwpt);
+    return dwpt;
   }
 
   private void ensureOpen() {
@@ -140,6 +143,12 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     final long ramBytesUsed = state.ramBytesUsed();
     assert contains(state)
         : "we tried to add a DWPT back to the pool but the pool doesn't know about this DWPT";
+    if (Thread.currentThread().getName().contains("t0")) {
+      try {
+        Thread.sleep(2000);
+      } catch (Exception e) {
+      }
+    }
     freeList.addAndUnlock(state, ramBytesUsed);
   }
 
@@ -182,6 +191,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // #getAndLock cannot pull this DWPT out of the pool since #getAndLock does a DWPT#tryLock to
     // check if the DWPT is available.
     assert perThread.isHeldByCurrentThread();
+    System.out.println(perThread + " checkout to remove");
     if (dwpts.remove(perThread)) {
       freeList.remove(perThread);
     } else {

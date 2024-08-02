@@ -39,6 +39,7 @@ import org.junit.Test;
 // http://lucenebook.com
 //
 
+@LuceneTestCase.SuppressSysoutChecks(bugUrl = "prints a message to syserr")
 public class TestSnapshotDeletionPolicy extends LuceneTestCase {
   public static final String INDEX_PATH = "test.snapshots";
 

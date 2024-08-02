@@ -574,6 +574,12 @@ final class DocumentsWriterFlushControl implements Accountable, Closeable {
       } finally {
         perThreadPool.unlockNewWriters();
       }
+      if (Thread.currentThread().getName().contains("t0")) {
+        try {
+          Thread.sleep(5000);
+        } catch (Exception e) {
+        }
+      }
     }
     final List<DocumentsWriterPerThread> fullFlushBuffer = new ArrayList<>();
     for (final DocumentsWriterPerThread next :

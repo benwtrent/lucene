@@ -411,8 +411,39 @@ final class DocumentsWriter implements Closeable, Accountable {
       final DocumentsWriterDeleteQueue.Node<?> delNode)
       throws IOException {
     boolean hasEvents = preUpdate();
-
+    if (Thread.currentThread().getName().contains("t9")) {
+      try {
+        Thread.sleep(100000);
+      } catch (Exception e) {
+      }
+    }
+    if (!Thread.currentThread().getName().contains("t0")) {
+      if (Thread.currentThread().getName().contains("t1")) {
+        try {
+          Thread.sleep(5000);
+        } catch (Exception e) {
+        }
+      } else if (Thread.currentThread().getName().contains("t2")) {
+        try {
+          Thread.sleep(5000);
+        } catch (Exception e) {
+        }
+      } else {
+        try {
+          Thread.sleep(1000);
+        } catch (Exception e) {
+        }
+      }
+    }
     final DocumentsWriterPerThread dwpt = flushControl.obtainAndLock();
+    if (!Thread.currentThread().getName().contains("t0")
+        && !Thread.currentThread().getName().contains("t1")
+        && !Thread.currentThread().getName().contains("t2")) {
+      try {
+        Thread.sleep(2000);
+      } catch (Exception e) {
+      }
+    }
     final DocumentsWriterPerThread flushingDWPT;
     long seqNo;
 
@@ -436,6 +467,12 @@ final class DocumentsWriter implements Closeable, Accountable {
         perThreadPool.marksAsFreeAndUnlock(dwpt);
       }
       assert dwpt.isHeldByCurrentThread() == false : "we didn't release the dwpt even on abort";
+    }
+    if (!Thread.currentThread().getName().contains("t0")) {
+      try {
+        Thread.sleep(50000);
+      } catch (Exception e) {
+      }
     }
 
     if (postUpdate(flushingDWPT, hasEvents)) {
@@ -542,6 +579,10 @@ final class DocumentsWriter implements Closeable, Accountable {
 
   synchronized long resetDeleteQueue(int maxNumPendingOps) {
     final DocumentsWriterDeleteQueue newQueue = deleteQueue.advanceQueue(maxNumPendingOps);
+    try {
+      Thread.sleep(5000);
+    } catch (Exception e) {
+    }
     assert deleteQueue.isAdvanced();
     assert newQueue.isAdvanced() == false;
     assert deleteQueue.getLastSequenceNumber() <= newQueue.getLastSequenceNumber();
@@ -658,8 +699,8 @@ final class DocumentsWriter implements Closeable, Accountable {
       assert !flushingDeleteQueue.anyChanges();
     } finally {
       assert flushingDeleteQueue == currentFullFlushDelQueue;
-      flushingDeleteQueue
-          .close(); // all DWPT have been processed and this queue has been fully flushed to the
+      // all DWPT have been processed and this queue has been fully flushed to the
+      flushingDeleteQueue.close();
       // ticket-queue
     }
     if (anythingFlushed) {

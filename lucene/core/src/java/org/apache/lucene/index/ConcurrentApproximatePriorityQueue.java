@@ -38,7 +38,7 @@ final class ConcurrentApproximatePriorityQueue<T> {
     int concurrency = coreCount / 4;
     concurrency = Math.max(MIN_CONCURRENCY, concurrency);
     concurrency = Math.min(MAX_CONCURRENCY, concurrency);
-    return concurrency;
+    return 3; // concurrency;
   }
 
   final int concurrency;

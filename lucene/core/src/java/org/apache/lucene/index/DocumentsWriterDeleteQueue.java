@@ -107,6 +107,17 @@ final class DocumentsWriterDeleteQueue implements Accountable, Closeable {
     this.infoStream = infoStream;
     this.globalBufferedUpdates = new BufferedUpdates("global");
     this.generation = generation;
+    System.out.println(
+        this
+            + " id: "
+            + System.identityHashCode(this)
+            + " tid: "
+            + Thread.currentThread().getName()
+            + Thread.currentThread().threadId()
+            + " new called from stack with start: "
+            + startSeqNo
+            + ": ");
+    Thread.dumpStack();
     this.nextSeqNo = new AtomicLong(startSeqNo);
     this.startSeqNo = startSeqNo;
     this.previousMaxSeqId = previousMaxSeqId;
@@ -320,6 +331,15 @@ final class DocumentsWriterDeleteQueue implements Accountable, Closeable {
       if (anyChanges()) {
         throw new IllegalStateException("Can't close queue unless all changes are applied");
       }
+      System.out.println(
+          this
+              + " id: "
+              + System.identityHashCode(this)
+              + " tid: "
+              + Thread.currentThread().getName()
+              + Thread.currentThread().threadId()
+              + " close called from stack: ");
+      Thread.dumpStack();
       this.closed = true;
       long seqNo = nextSeqNo.get();
       assert seqNo <= maxSeqNo
@@ -562,8 +582,25 @@ final class DocumentsWriterDeleteQueue implements Accountable, Closeable {
     return "DWDQ: [ generation: " + generation + " ]";
   }
 
-  public long getNextSequenceNumber() {
+  /**
+   * This returns the next sequence number. If using in a multithreaded scenario, must be
+   * synchronized with close
+   *
+   * @return the next sequence number
+   */
+  public synchronized long getNextSequenceNumber() {
     long seqNo = nextSeqNo.getAndIncrement();
+    System.out.println(
+        this
+            + " id: "
+            + System.identityHashCode(this)
+            + " tid: "
+            + Thread.currentThread().getName()
+            + Thread.currentThread().threadId()
+            + " getNextSequenceNumber "
+            + seqNo
+            + " called from stack: ");
+    Thread.dumpStack();
     assert seqNo <= maxSeqNo : "seqNo=" + seqNo + " vs maxSeqNo=" + maxSeqNo;
     return seqNo;
   }
@@ -577,6 +614,15 @@ final class DocumentsWriterDeleteQueue implements Accountable, Closeable {
    * in-flight threads get sequence numbers inside the gap
    */
   void skipSequenceNumbers(long jump) {
+    System.out.println(
+        this
+            + " id: "
+            + System.identityHashCode(this)
+            + " tid: "
+            + Thread.currentThread().getName()
+            + Thread.currentThread().threadId()
+            + " skipSequenceNumbers called from stack: ");
+    Thread.dumpStack();
     nextSeqNo.addAndGet(jump);
   }
 
@@ -616,8 +662,24 @@ final class DocumentsWriterDeleteQueue implements Accountable, Closeable {
       throw new IllegalStateException("queue was already advanced");
     }
     advanced = true;
+    long lastSeqNo = getLastSequenceNumber();
     long seqNo = getLastSequenceNumber() + maxNumPendingOps + 1;
     maxSeqNo = seqNo;
+    System.out.println(
+        this
+            + " id: "
+            + System.identityHashCode(this)
+            + " tid: "
+            + Thread.currentThread().getName()
+            + Thread.currentThread().threadId()
+            + " advanceQueue called from stack with maxSeq "
+            + maxSeqNo
+            + " lastSeqNo: "
+            + lastSeqNo
+            + " maxNumPendingOps: "
+            + maxNumPendingOps
+            + ": ");
+    Thread.dumpStack();
     return new DocumentsWriterDeleteQueue(
         infoStream,
         generation + 1,
