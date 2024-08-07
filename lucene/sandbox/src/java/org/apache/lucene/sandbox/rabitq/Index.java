@@ -18,7 +18,7 @@ public class Index {
   //  static final int SIFTSMALL_DOCS_SIZE = 10_000;
 
   public static void main(String[] args) throws Exception {
-    String source ="/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M";;
+    String source ="/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M/";
     int numCentroids = 1;//Integer.parseInt(args[2]);
     int dimensions = 1024;// Integer.parseInt(args[3]);
     int totalTrainingDocs = 100_000;//Integer.parseInt(args[4]);
