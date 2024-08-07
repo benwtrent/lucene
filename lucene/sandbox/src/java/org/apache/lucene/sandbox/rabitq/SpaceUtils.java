@@ -2,8 +2,10 @@ package org.apache.lucene.sandbox.rabitq;
 
 import java.util.BitSet;
 import jdk.incubator.vector.ByteVector;
+import jdk.incubator.vector.LongVector;
 import jdk.incubator.vector.ShortVector;
 import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorShape;
 import jdk.incubator.vector.VectorSpecies;
 import org.apache.lucene.util.BitUtil;
 
@@ -11,6 +13,17 @@ public class SpaceUtils {
 
   private static final VectorSpecies<Byte> BYTE_SPECIES = ByteVector.SPECIES_PREFERRED;
   private static final VectorSpecies<Byte> BYTE_128_SPECIES = ByteVector.SPECIES_128;
+  private static final VectorSpecies<Integer> INT_SPECIES;
+
+
+  static final int VECTOR_BITSIZE;
+  static {
+    // default to platform supported bitsize
+    int vectorBitSize = VectorShape.preferredShape().vectorBitSize();
+    // but allow easy overriding for testing
+    INT_SPECIES = VectorSpecies.of(int.class, VectorShape.forBitSize(vectorBitSize));
+    VECTOR_BITSIZE = INT_SPECIES.vectorBitSize();
+  }
 
   public static final int B_QUERY = 4;
 
@@ -104,6 +117,66 @@ public class SpaceUtils {
   }
 
   public static long ipByteBinBytePan(byte[] q, byte[] d) {
+    if (VECTOR_BITSIZE < 256) {
+      return ipByteBinBytePan128(q, d);
+    }
+    return ipByteBinPath512(q, d);
+  }
+
+  public static long ipByteBinPath512(byte[] q, byte[] d) {
+    long ret = 0;
+    long subRet0 = 0;
+    long subRet1 = 0;
+    long subRet2 = 0;
+    long subRet3 = 0;
+    int limit = ByteVector.SPECIES_PREFERRED.loopBound(d.length);
+    int r = 0;
+    LongVector sum0 = LongVector.zero(LongVector.SPECIES_PREFERRED);
+    LongVector sum1 = LongVector.zero(LongVector.SPECIES_PREFERRED);
+    LongVector sum2 = LongVector.zero(LongVector.SPECIES_PREFERRED);
+    LongVector sum3 = LongVector.zero(LongVector.SPECIES_PREFERRED);
+
+    for (; r < limit; r += ByteVector.SPECIES_PREFERRED.length()) {
+      LongVector vq0 = ByteVector.fromArray(ByteVector.SPECIES_PREFERRED, q, r).reinterpretAsLongs();
+      LongVector vq1 = ByteVector.fromArray(ByteVector.SPECIES_PREFERRED, q, r + d.length).reinterpretAsLongs();
+      LongVector vq2 = ByteVector.fromArray(ByteVector.SPECIES_PREFERRED, q, r + d.length * 2).reinterpretAsLongs();
+      LongVector vq3 = ByteVector.fromArray(ByteVector.SPECIES_PREFERRED, q, r + d.length * 3).reinterpretAsLongs();
+      LongVector vd = ByteVector.fromArray(ByteVector.SPECIES_PREFERRED, d, r).reinterpretAsLongs();
+      LongVector vres0 = vq0.and(vd).lanewise(VectorOperators.BIT_COUNT);
+      LongVector vres1 = vq1.and(vd).lanewise(VectorOperators.BIT_COUNT);
+      LongVector vres2 = vq2.and(vd).lanewise(VectorOperators.BIT_COUNT);
+      LongVector vres3 = vq3.and(vd).lanewise(VectorOperators.BIT_COUNT);
+      sum0 = sum0.add(vres0);
+      sum1 = sum1.add(vres1);
+      sum2 = sum2.add(vres2);
+      sum3 = sum3.add(vres3);
+    }
+    subRet0 += sum0.reduceLanes(VectorOperators.ADD);
+    subRet1 += sum1.reduceLanes(VectorOperators.ADD);
+    subRet2 += sum2.reduceLanes(VectorOperators.ADD);
+    subRet3 += sum3.reduceLanes(VectorOperators.ADD);
+    // tail as ints
+    for (; r < d.length-Integer.BYTES; r+=Integer.BYTES) {
+      subRet0 += Integer.bitCount((int) BitUtil.VH_NATIVE_INT.get(q, r) & (int) BitUtil.VH_NATIVE_INT.get(d, r));
+      subRet1 += Integer.bitCount((int) BitUtil.VH_NATIVE_INT.get(q, r + d.length) & (int) BitUtil.VH_NATIVE_INT.get(d, r));
+      subRet2 += Integer.bitCount((int) BitUtil.VH_NATIVE_INT.get(q, r + 2 * d.length) & (int) BitUtil.VH_NATIVE_INT.get(d, r));
+      subRet3 += Integer.bitCount((int) BitUtil.VH_NATIVE_INT.get(q, r + 3 * d.length) & (int) BitUtil.VH_NATIVE_INT.get(d, r));
+    }
+    // tail as bytes
+    for (; r < d.length; r++) {
+      subRet0 += Integer.bitCount((q[r] & d[r]) & 0xFF);
+      subRet1 += Integer.bitCount((q[r + d.length] & d[r]) & 0xFF);
+      subRet2 += Integer.bitCount((q[r + 2 * d.length] & d[r]) & 0xFF);
+      subRet3 += Integer.bitCount((q[r + 3 * d.length] & d[r]) & 0xFF);
+    }
+    ret += subRet0;
+    ret += subRet1 << 1;
+    ret += subRet2 << 2;
+    ret += subRet3 << 3;
+    return ret;
+  }
+
+  public static long ipByteBinBytePan128(byte[] q, byte[] d) {
     long ret = 0;
     long subRet0 = 0;
     long subRet1 = 0;
