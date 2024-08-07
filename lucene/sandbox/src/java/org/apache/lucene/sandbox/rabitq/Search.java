@@ -33,7 +33,7 @@ public class Search {
     // FIXME: better arg parsing
     // FIXME: clean up gross path mgmt
     // search DIRECTORY_TO_DATASET DATASET_NAME NUM_CENTROIDS DIMENSIONS B_QUERY OUTPUT_PATH
-    String source = "/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M";// args[0]; // eg "/Users/jwagster/Desktop/gist1m/gist/"
+    String source = "/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M/";// args[0]; // eg "/Users/jwagster/Desktop/gist1m/gist/"
     int numCentroids = 1;//Integer.parseInt(args[2]);
     int dimensions = 1024;//Integer.parseInt(args[3]);
     int k = 10;//Integer.parseInt(args[4]);
