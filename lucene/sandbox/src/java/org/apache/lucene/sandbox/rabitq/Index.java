@@ -18,27 +18,26 @@ public class Index {
   //  static final int SIFTSMALL_DOCS_SIZE = 10_000;
 
   public static void main(String[] args) throws Exception {
-    String source = args[0];
-    String dataset = args[1];
-    int numCentroids = Integer.parseInt(args[2]);
-    int dimensions = Integer.parseInt(args[3]);
-    int totalTrainingDocs = Integer.parseInt(args[4]);
+    String source ="/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M";;
+    int numCentroids = 1;//Integer.parseInt(args[2]);
+    int dimensions = 1024;// Integer.parseInt(args[3]);
+    int totalTrainingDocs = 10_000;//Integer.parseInt(args[4]);
     int numDocs = totalTrainingDocs;
     Path basePath = Paths.get(source);
-    Path fvecPath = Paths.get(basePath.toString(), dataset + "_base.fvecs");
+    Path fvecPath = Paths.get(basePath.toString(), "cohere-documents-01-10.fvec");
     int D = dimensions;
     int B = (D + 63) / 64 * 64;
     try (MMapDirectory directory = new MMapDirectory(basePath);
         IndexInput vectorInput = directory.openInput(fvecPath.toString(), IOContext.DEFAULT)) {
       RandomAccessVectorValues.Floats vectorValues =
           new VectorsReaderWithOffset(vectorInput, numDocs, dimensions, 0);
-      System.out.println("Clustering - " + dataset);
+      System.out.println("Clustering - cohere");
       long startTime = System.nanoTime();
       IVFOutput ivfOutput = clusterWithIVF(vectorValues, numCentroids, dimensions);
       long nanosToComputeIVF = System.nanoTime() - startTime;
       System.out.println(
           "Time to compute IVF: " + TimeUnit.NANOSECONDS.toMillis(nanosToComputeIVF));
-      System.out.println("Generating subspaces - " + dataset);
+      System.out.println("Generating subspaces - cohere");
       int MAX_BD = Math.max(D, B);
       startTime = System.nanoTime();
       SubspaceOutput subspaceOutput =

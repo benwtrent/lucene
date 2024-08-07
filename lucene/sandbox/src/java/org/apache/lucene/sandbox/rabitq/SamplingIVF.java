@@ -17,8 +17,7 @@ public class SamplingIVF {
   public void train(RandomAccessVectorValues.Floats vectors, int dimensions) throws IOException {
     // FIXME: FUTURE do error checking ... has to be at least as many vectors as centroids for now
 
-    int vectorsLength = vectors.size();
-    SampleReader sampleReader = SampleReader.createSampleReader(vectors, vectorsLength / 90, seed);
+    SampleReader sampleReader = SampleReader.createSampleReader(vectors, 131072, seed);
     KMeans kMeans = new KMeans(sampleReader, totalClusters, seed);
     float[][] centroids = kMeans.computeCentroids(5, 10, f -> {});
 

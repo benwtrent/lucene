@@ -33,16 +33,15 @@ public class Search {
     // FIXME: better arg parsing
     // FIXME: clean up gross path mgmt
     // search DIRECTORY_TO_DATASET DATASET_NAME NUM_CENTROIDS DIMENSIONS B_QUERY OUTPUT_PATH
-    String source = args[0]; // eg "/Users/jwagster/Desktop/gist1m/gist/"
-    String dataset = args[1]; // eg "gist"
-    int numCentroids = Integer.parseInt(args[2]);
-    int dimensions = Integer.parseInt(args[3]);
-    int k = Integer.parseInt(args[4]);
-    int totalQueryVectors = Integer.parseInt(args[5]);
+    String source = "/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M";// args[0]; // eg "/Users/jwagster/Desktop/gist1m/gist/"
+    int numCentroids = 1;//Integer.parseInt(args[2]);
+    int dimensions = 1024;//Integer.parseInt(args[3]);
+    int k = 10;//Integer.parseInt(args[4]);
+    int totalQueryVectors = 1000;//Integer.parseInt(args[5]);
     boolean doHnsw = false;
     int maxConns = 16;
     int beamWidth = 100;
-    int graphQuerySize = 2;
+    int graphQuerySize = 4;
     if (args.length > 6) {
       doHnsw = Boolean.parseBoolean(args[6]);
       if (args.length > 7) {
@@ -58,10 +57,10 @@ public class Search {
     int B = (dimensions + 63) / 64 * 64;
     Path basePath = Paths.get(source);
 
-    String queryPath = String.format("%s%s_query.fvecs", source, dataset);
-    String dataPath = String.format("%s%s_base.fvecs", source, dataset);
-    String groundTruthPath = String.format("%s%s_groundtruth.ivecs", source, dataset);
-    String graphBuilderQueries = String.format("%s%s_graph_builder_temp", source, dataset);
+    String queryPath = String.format("%squeries.fvec", source);
+    String dataPath = String.format("%scohere-documents-01-10.fvec", source);
+    String groundTruthPath = String.format("%squeries-ground-truth.fvec", source);
+    String graphBuilderQueries = String.format("%s%s_graph_builder_temp", source, "cohere");
 
     String indexPath = String.format("%sivfrabitq%d_B%d.index", source, numCentroids, B);
     IVFRN ivfrn = IVFRN.load(indexPath);
@@ -138,22 +137,29 @@ public class Search {
           graphBuildTime = System.nanoTime() - graphBuildTime;
           System.out.println(
               "Graph build time: " + TimeUnit.NANOSECONDS.toMillis(graphBuildTime) + " ms");
-          System.out.println("WARM UP");
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
-          System.out.println("\n\nTESTING\n\n");
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k * 2);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k * 3);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k * 4);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k * 5);
-          testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k * 10);
+
+          for (int i = 0; i < 5; i++) {
+            testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k);
+          }
+          for (int i = 0; i < 5; i++) {
+            testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k*2);
+          }
+          for (int i = 0; i < 5; i++) {
+            testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k*3);
+          }
+          for (int i = 0; i < 5; i++) {
+            testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k*4);
+          }
+          for (int i = 0; i < 5; i++) {
+            testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k*5);
+          }
+          for (int i = 0; i < 5; i++) {
+            testHnsw(queryVectors, dataVectors, G, ivfrn, graph, k, k*10);
+          }
         }
       } else {
+        test(queryVectors, dataVectors, G, ivfrn, k);
+        test(queryVectors, dataVectors, G, ivfrn, k);
         test(queryVectors, dataVectors, G, ivfrn, k);
         test(queryVectors, dataVectors, G, ivfrn, k);
         test(queryVectors, dataVectors, G, ivfrn, k);
