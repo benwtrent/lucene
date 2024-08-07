@@ -21,7 +21,7 @@ public class Index {
     String source ="/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M/";
     int numCentroids = 1;//Integer.parseInt(args[2]);
     int dimensions = 1024;// Integer.parseInt(args[3]);
-    int totalTrainingDocs = 100_000;//Integer.parseInt(args[4]);
+    int totalTrainingDocs = 30_000_000;//Integer.parseInt(args[4]);
     int numDocs = totalTrainingDocs;
     Path basePath = Paths.get(source);
     Path fvecPath = Paths.get(basePath.toString(), "cohere-documents-01-10.fvec");

@@ -37,7 +37,7 @@ public class Search {
     int numCentroids = 1;//Integer.parseInt(args[2]);
     int dimensions = 1024;//Integer.parseInt(args[3]);
     int k = 10;//Integer.parseInt(args[4]);
-    int totalQueryVectors = 1000;//Integer.parseInt(args[5]);
+    int totalQueryVectors = 100;//Integer.parseInt(args[5]);
     boolean doHnsw = false;
     int maxConns = 16;
     int beamWidth = 100;
@@ -59,7 +59,7 @@ public class Search {
 
     String queryPath = String.format("%squeries.fvec", source);
     String dataPath = String.format("%scohere-documents-01-10.fvec", source);
-    String groundTruthPath = String.format("%squeries-ground-100k-truth.fvec", source);
+    String groundTruthPath = String.format("%squeries-ground-truth.fvec", source);
     String graphBuilderQueries = String.format("%s%s_graph_builder_temp", source, "cohere");
 
     String indexPath = String.format("%sivfrabitq%d_B%d.index", source, numCentroids, B);
