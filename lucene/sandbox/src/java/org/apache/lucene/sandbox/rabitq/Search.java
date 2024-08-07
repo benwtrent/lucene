@@ -59,7 +59,7 @@ public class Search {
 
     String queryPath = String.format("%squeries.fvec", source);
     String dataPath = String.format("%scohere-documents-01-10.fvec", source);
-    String groundTruthPath = String.format("%squeries-ground-truth.fvec", source);
+    String groundTruthPath = String.format("%squeries-ground-100k-truth.fvec", source);
     String graphBuilderQueries = String.format("%s%s_graph_builder_temp", source, "cohere");
 
     String indexPath = String.format("%sivfrabitq%d_B%d.index", source, numCentroids, B);
