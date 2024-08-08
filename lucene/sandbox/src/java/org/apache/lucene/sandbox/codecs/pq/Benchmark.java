@@ -36,23 +36,22 @@ import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
 /** Benchmark for Product Quantization. */
 @SuppressForbidden(reason = "System.out required: command line tool")
 public class Benchmark {
-  private static final int NUM_DIMS = 768;
-  private static final int NUM_DOCS = 934_024;
-  private static final int NUM_QUERIES = 1_000;
-  public static final int FILE_VECTOR_OFFSET = Float.BYTES;
-  public static final int FILE_BYTESIZE = NUM_DIMS * Float.BYTES + FILE_VECTOR_OFFSET;
-  private static final Path dirPath = Paths.get("/Users/mayya/Elastic/knn/ann-prototypes/data");
-  private static final String vectorFile = "corpus-wiki-cohere.fvec";
-  private static final String queryFile = "queries-wiki-cohere.fvec";
-  private static String groundTruthFile = "queries-wiki-cohere-ground-truth.fvec";
-  private static VectorSimilarityFunction vectorFunction = VectorSimilarityFunction.COSINE;
-  private static int[] numBooks =
-      new int[] {NUM_DIMS * 4 / 32, NUM_DIMS * 4 / 64, NUM_DIMS * 4 / 96, NUM_DIMS * 4 / 128};
+  private static final int NUM_DIMS = 1024;
+  private static final int NUM_DOCS = 30_000_000;
+  private static final int NUM_QUERIES = 100;
+  public static final int FILE_VECTOR_OFFSET = 0;
+  public static final int FILE_BYTESIZE = NUM_DIMS * Float.BYTES;
+  private static final Path dirPath = Paths.get("/home/esbench/.rally/benchmarks/races/data/cohere-v3-30M");
+  private static final String vectorFile = "cohere-documents-01-10.fvec";
+  private static final String queryFile = "queries.fvec";
+  private static String groundTruthFile = "queries-ground-truth.fvec";
+  private static VectorSimilarityFunction vectorFunction = VectorSimilarityFunction.DOT_PRODUCT;
+  private static int[] numBooks = new int[] {NUM_DIMS * 4 / 32};
   private static float anisotropicThreshold = 0.0f;
 
-  private static boolean useHnsw = true;
+  private static boolean useHnsw = false;
   private static final int[] topKs = new int[] {10};
-  private static final int[] rerankFactors = new int[] {1, 2, 4, 8, 10};
+  private static final int[] rerankFactors = new int[] {1, 2, 3, 4, 5, 10};
   private static long seed = 42L;
 
   public static void main(String[] args) throws Exception {
@@ -154,20 +153,29 @@ public class Benchmark {
         int row = 0;
         for (int topK : topKs) {
           for (int rerankFactor : rerankFactors) {
-            int totalMatches = 0;
-            int totalResults = 0;
-            long elapsedCodeCmp = 0;
-            for (int i = 0; i < NUM_QUERIES; i++) {
-              float[] candidate = queryVectorValues.vectorValue(i);
-              long startCodeCmp = System.nanoTime();
-              int[] results = pq.getTopDocs(candidate, topK * rerankFactor);
-              elapsedCodeCmp += System.nanoTime() - startCodeCmp;
-              totalMatches += compareNN(groundTruths[i], results, topK);
-              totalResults += topK;
+            // do 5 of the same queries, and take the best
+            for (int k = 0; k < 5; k++) {
+              int totalMatches = 0;
+              int totalResults = 0;
+              long elapsedCodeCmp = 0;
+              for (int i = 0; i < NUM_QUERIES; i++) {
+                float[] candidate = queryVectorValues.vectorValue(i);
+                long startCodeCmp = System.nanoTime();
+                int[] results = pq.getTopDocs(candidate, topK * rerankFactor);
+                elapsedCodeCmp += System.nanoTime() - startCodeCmp;
+                totalMatches += compareNN(groundTruths[i], results, topK);
+                totalResults += topK;
+              }
+              float recall = totalMatches / (float) totalResults;
+              if (k == 0) {
+                elapsedCodes[row] = TimeUnit.NANOSECONDS.toMillis(elapsedCodeCmp);
+                recalls[row] = recall;
+              } else {
+                long elapsedCode = TimeUnit.NANOSECONDS.toMillis(elapsedCodeCmp);
+                elapsedCodes[row] = Math.min(elapsedCodes[row], elapsedCode);
+              }
             }
-            float recall = totalMatches / (float) totalResults;
-            elapsedCodes[row] = TimeUnit.NANOSECONDS.toMillis(elapsedCodeCmp);
-            recalls[row++] = recall;
+            row++;
           }
         }
         System.out.println("Recall:");
