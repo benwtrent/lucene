@@ -138,6 +138,7 @@ public class Benchmark {
           // writing to the ground truth file
           try (IndexOutput queryGroudTruthOutput =
               directory.createOutput(groundTruthFile, IOContext.DEFAULT)) {
+            System.out.println("Creating ground truth file: " + groundTruthFile);
             for (int i = 0; i < NUM_QUERIES; i++) {
               float[] candidate = queryVectorValues.vectorValue(i);
               groundTruths[i] = getNN(vectorValues, candidate, topKs[topKs.length - 1]);
@@ -151,6 +152,7 @@ public class Benchmark {
         float[] recalls = new float[topKs.length * rerankFactors.length];
         long[] elapsedCodes = new long[topKs.length * rerankFactors.length];
         int row = 0;
+        System.out.println("Benchmarking...");
         for (int topK : topKs) {
           for (int rerankFactor : rerankFactors) {
             // do 5 of the same queries, and take the best

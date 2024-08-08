@@ -116,6 +116,7 @@ public class ProductQuantizer {
     // for each document which coarse centroid it belongs to,
     // we expect < 32767 coarse centroids
     short[] docCentroids = new short[vectors.size()];
+    System.out.println("Coarse clustering...");
     float[][] coarseCentroids =
         coarseClustering(
             vectors, vectorSimFunction == VectorSimilarityFunction.COSINE, docCentroids, seed);
@@ -128,6 +129,7 @@ public class ProductQuantizer {
         TimeUnit.NANOSECONDS.toMillis(elapsed), COARSE_CLUSTERING_SAMPLE_SIZE, numCoarseCentroids);
 
     // **** 2. Train sub-quantizers for each coarse centroid separately
+    System.out.println("Training codebooks...");
     start = System.nanoTime();
     int bookDim = dims / numBooks;
     int numSamplesPerCluster = vectors.dimension() * 64;
@@ -174,6 +176,7 @@ public class ProductQuantizer {
         TimeUnit.NANOSECONDS.toMillis(elapsed), numSamplesPerCluster, numBooks);
 
     //  **** 3. encode vector values
+    System.out.println("Encoding docs...");
     start = System.nanoTime();
     final byte[][] docCodes =
         anisotropicThreshold > 0
@@ -190,6 +193,7 @@ public class ProductQuantizer {
     OnHeapHnswGraph hnswGraph = null;
     PQScorerSupplier scorerSupplier = null;
     if (useHnsw & numCoarseCentroids == 1) {
+      System.out.println("Building HNSW graph...");
       PQUtils.QuantizedVectors quantizedVectors = new PQUtils.QuantizedVectors(docCodes);
       scorerSupplier =
           new PQUtils.PQScorerSupplier(quantizedVectors, vectorSimFunction, codebooks[0]);
