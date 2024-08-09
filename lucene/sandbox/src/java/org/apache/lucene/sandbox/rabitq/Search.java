@@ -37,7 +37,7 @@ public class Search {
     int numCentroids = 1;//Integer.parseInt(args[2]);
     int dimensions = 1024;//Integer.parseInt(args[3]);
     int k = 10;//Integer.parseInt(args[4]);
-    int totalQueryVectors = 10;//Integer.parseInt(args[5]);
+    int totalQueryVectors = 100;//Integer.parseInt(args[5]);
     boolean doHnsw = false;
     int maxConns = 16;
     int beamWidth = 100;
@@ -158,6 +158,7 @@ public class Search {
           }
         }
       } else {
+        System.out.println("Starting search over: " + totalQueryVectors + " queries & totalVectors: " + dataVectors.size());
         test(queryVectors, dataVectors, G, ivfrn, k);
         test(queryVectors, dataVectors, G, ivfrn, k);
         test(queryVectors, dataVectors, G, ivfrn, k);
