@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.TopKnnCollector;
+import org.apache.lucene.search.knn.EntryPointProvider;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
@@ -67,25 +68,27 @@ public class HnswGraphSearcher {
   public static void search(
       RandomVectorScorer scorer, KnnCollector knnCollector, HnswGraph graph, Bits acceptOrds)
       throws IOException {
-    ArrayList<Integer> entryPointOrdInts = null;
-    DocIdSetIterator entryPoints = knnCollector.getSeedEntryPoints();
-    if (entryPoints != null) {
-      entryPointOrdInts = new ArrayList<Integer>();
+    final int[] entryPoints;
+    if (knnCollector instanceof EntryPointProvider epp) {
+      DocIdSetIterator eps = epp.entryPoints();
+      entryPoints = new int[(int) eps.cost()];
+      int idx = 0;
       int entryPointOrdInt;
-      while ((entryPointOrdInt = entryPoints.nextDoc()) != NO_MORE_DOCS) {
-        entryPointOrdInts.add(entryPointOrdInt);
+      while ((entryPointOrdInt = eps.nextDoc()) != NO_MORE_DOCS) {
+        entryPoints[idx++] = entryPointOrdInt;
       }
+    } else {
+      entryPoints = null;
     }
     HnswGraphSearcher graphSearcher =
         new HnswGraphSearcher(
             new NeighborQueue(knnCollector.k(), true), new SparseFixedBitSet(getGraphSize(graph)));
-    if (entryPointOrdInts == null || entryPointOrdInts.isEmpty()) {
+    if (entryPoints == null || entryPoints.length == 0) {
       search(scorer, knnCollector, graph, graphSearcher, acceptOrds);
     } else {
-      int[] entryPointOrdIntsArr = entryPointOrdInts.stream().mapToInt(Integer::intValue).toArray();
       // We use provided entry point ordinals to search the complete graph (level 0)
       graphSearcher.searchLevel(
-          knnCollector, scorer, 0 /* level */, entryPointOrdIntsArr, graph, acceptOrds);
+          knnCollector, scorer, 0 /* level */, entryPoints, graph, acceptOrds);
     }
   }
 
