@@ -14,5 +14,6 @@
 #  limitations under the License.
 
 org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat
+org.apache.lucene.codecs.lucene101.Lucene101HnswVectorsFormat
 org.apache.lucene.codecs.lucene99.Lucene99HnswScalarQuantizedVectorsFormat
 org.apache.lucene.codecs.lucene99.Lucene99ScalarQuantizedVectorsFormat

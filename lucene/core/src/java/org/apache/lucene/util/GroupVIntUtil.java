@@ -226,6 +226,49 @@ public final class GroupVIntUtil {
     return (int) value;
   }
 
+  public static int calculateNumBytes(int[] values, int limit) {
+    int readPos = 0;
+    int totalBytes = 0;
+    while ((limit - readPos) >= 4) {
+      final int n1Minus1 = numBytes(values[readPos]);
+      final int n2Minus1 = numBytes(values[readPos + 1]);
+      final int n3Minus1 = numBytes(values[readPos + 2]);
+      final int n4Minus1 = numBytes(values[readPos + 3]);
+      totalBytes += 1 + n1Minus1 + 1 + n2Minus1 + 1 + n3Minus1 + 1 + n4Minus1;
+      readPos += 4;
+    }
+    for (; readPos < limit; readPos++) {
+      // given how vint is written, calculate the number of bytes required to write the remaining values
+      int numBytes = 1;
+      if (values[readPos] > 127) {
+        numBytes += 1;
+      }
+      if (values[readPos] > 16383) {
+        numBytes += 1;
+      }
+      if (values[readPos] > 2097151) {
+        numBytes += 1;
+      }
+      totalBytes += numBytes;
+    }
+    return totalBytes;
+  }
+
+  public static int calculateVintBytes(int v) {
+    // given how vint is written, calculate the number of bytes required to write the remaining values
+    int numBytes = 1;
+    if (v > 127) {
+      numBytes += 1;
+    }
+    if (v > 16383) {
+      numBytes += 1;
+    }
+    if (v > 2097151) {
+      numBytes += 1;
+    }
+    return numBytes;
+  }
+
   /**
    * The implementation for group-varint encoding, It uses a maximum of {@link
    * #MAX_LENGTH_PER_GROUP} bytes scratch buffer.
