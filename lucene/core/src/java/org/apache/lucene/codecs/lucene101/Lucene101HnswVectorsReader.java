@@ -197,6 +197,20 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
               + " != "
               + fieldEntry.dimension);
     }
+    // assert graph byte size
+    long expectedBytes = (long) fieldEntry.size * fieldEntry.byteSizeByLevel[0];
+    for (int i = 1; i < fieldEntry.numLevels; i++) {
+      expectedBytes += (long)fieldEntry.byteSizeByLevel[i] * fieldEntry.nodesByLevel[i].length;
+    }
+    if (expectedBytes != fieldEntry.vectorIndexLength) {
+      throw new IllegalStateException(
+          "Inconsistent graph byte size for field=\""
+              + info.name
+              + "\"; "
+              + expectedBytes
+              + " != "
+              + fieldEntry.vectorIndexLength);
+    }
   }
 
   // List of vector similarity functions. This list is defined here, in order
@@ -458,6 +472,9 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
       int targetIndex = byteSizeByLevel[level] * targetOrd;
       dataIn.seek(targetIndex);
       arcCount = dataIn.readVInt();
+      if (arcCount > currentNeighborsBuffer.length) {
+        throw new CorruptIndexException("too many neighbors: " + arcCount, dataIn);
+      }
       assert arcCount <= currentNeighborsBuffer.length : "too many neighbors: " + arcCount;
       if (arcCount > 0) {
         GroupVIntUtil.readGroupVInts(dataIn, currentNeighborsBuffer, arcCount);

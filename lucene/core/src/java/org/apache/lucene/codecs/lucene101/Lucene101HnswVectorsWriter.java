@@ -348,7 +348,9 @@ public final class Lucene101HnswVectorsWriter extends KnnVectorsWriter {
     int size = neighbors.size();
     vectorIndex.writeVInt(size);
     int[] nnodes = neighbors.nodes();
-    vectorIndex.writeGroupVInts(nnodes, size);
+    if (size > 0) {
+      vectorIndex.writeGroupVInts(nnodes, size);
+    }
   }
 
   @Override
@@ -450,7 +452,9 @@ public final class Lucene101HnswVectorsWriter extends KnnVectorsWriter {
         long offsetStart = vectorIndex.getFilePointer();
         int[] nnodes = neighbors.nodes();
         vectorIndex.writeVInt(size);
-        vectorIndex.writeGroupVInts(nnodes, size);
+        if (size > 0) {
+          vectorIndex.writeGroupVInts(nnodes, size);
+        }
         int bytesWritten = Math.toIntExact(vectorIndex.getFilePointer() - offsetStart);
         if (bytesWritten > maxBytes) {
           throw new IllegalStateException(

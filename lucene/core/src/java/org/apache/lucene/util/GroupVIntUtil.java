@@ -227,6 +227,9 @@ public final class GroupVIntUtil {
   }
 
   public static int calculateNumBytes(int[] values, int limit) {
+    if (limit == 0) {
+      return 0;
+    }
     int readPos = 0;
     int totalBytes = 0;
     while ((limit - readPos) >= 4) {

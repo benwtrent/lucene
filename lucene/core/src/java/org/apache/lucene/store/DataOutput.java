@@ -350,6 +350,9 @@ public abstract class DataOutput {
    * @lucene.experimental
    */
   public void writeGroupVInts(int[] values, int limit) throws IOException {
+    if (limit == 0) {
+      return;
+    }
     if (groupVIntBytes == null) {
       groupVIntBytes = new byte[GroupVIntUtil.MAX_LENGTH_PER_GROUP];
     }
