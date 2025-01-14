@@ -257,8 +257,9 @@ public final class Lucene101HnswVectorsWriter extends KnnVectorsWriter {
       NodesIterator nodesOnLevel = graph.getNodesOnLevel(level);
       // we need to copy to ensure we can write the graph nodes per level accurately
       int[] newNodes = new int[nodesOnLevel.size()];
-      for (int n = 0; nodesOnLevel.hasNext(); n++) {
-        newNodes[n] = oldToNewMap[nodesOnLevel.nextInt()];
+      int n = 0;
+      while (nodesOnLevel.hasNext()) {
+        newNodes[n++] = oldToNewMap[nodesOnLevel.nextInt()];
       }
       Arrays.sort(newNodes);
       nodesByLevel.add(newNodes);
@@ -274,7 +275,8 @@ public final class Lucene101HnswVectorsWriter extends KnnVectorsWriter {
       while (nodes.hasNext()) {
         int node = nodes.nextInt();
         long offset = vectorIndex.getFilePointer();
-        NeighborArray neighbors = graph.getNeighbors(level, newToOldMap[node]);
+        // We have already translated, so we can use the new node id
+        NeighborArray neighbors = graph.getNeighbors(level, node);
         writeNeighbors(neighbors);
         int bytesWritten = Math.toIntExact(vectorIndex.getFilePointer() - offset);
         if (bytesWritten > maxBytesPerLevel[level]) {
@@ -466,6 +468,7 @@ public final class Lucene101HnswVectorsWriter extends KnnVectorsWriter {
         }
       }
     }
+
     return maxBytesToWritePerLevel;
   }
 

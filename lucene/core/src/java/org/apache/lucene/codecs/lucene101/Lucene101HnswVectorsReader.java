@@ -198,18 +198,20 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
               + fieldEntry.dimension);
     }
     // assert graph byte size
-    long expectedBytes = (long) fieldEntry.size * fieldEntry.byteSizeByLevel[0];
-    for (int i = 1; i < fieldEntry.numLevels; i++) {
-      expectedBytes += (long)fieldEntry.byteSizeByLevel[i] * fieldEntry.nodesByLevel[i].length;
-    }
-    if (expectedBytes != fieldEntry.vectorIndexLength) {
-      throw new IllegalStateException(
+    if (fieldEntry.size > 0) {
+      long expectedBytes = (long) fieldEntry.size * fieldEntry.byteSizeByLevel[0];
+      for (int i = 1; i < fieldEntry.numLevels; i++) {
+        expectedBytes += (long) fieldEntry.byteSizeByLevel[i] * fieldEntry.nodesByLevel[i].length;
+      }
+      if (expectedBytes != fieldEntry.vectorIndexLength) {
+        throw new IllegalStateException(
           "Inconsistent graph byte size for field=\""
-              + info.name
-              + "\"; "
-              + expectedBytes
-              + " != "
-              + fieldEntry.vectorIndexLength);
+            + info.name
+            + "\"; "
+            + expectedBytes
+            + " != "
+            + fieldEntry.vectorIndexLength);
+      }
     }
   }
 
@@ -400,7 +402,8 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
       int size,
       int[][] nodesByLevel,
       // for each level the start offsets in vectorIndex file from where to read neighbours
-      int[] byteSizeByLevel) {
+      int[] byteSizeByLevel,
+      long[] levelOffset) {
 
     static FieldEntry create(
         IndexInput input,
@@ -416,11 +419,14 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
       final var numLevels = input.readVInt();
       final var nodesByLevel = new int[numLevels][];
       final var byteSizeByLevel = new int[numLevels];
+      final var levelOffsets = new long[numLevels];
       for (int level = 0; level < numLevels; level++) {
         byteSizeByLevel[level] = input.readVInt();
         if (level > 0) {
           int numNodesOnLevel = input.readVInt();
           nodesByLevel[level] = new int[numNodesOnLevel];
+          int numNodesOnPrevLevel = nodesByLevel[level - 1] == null ? size : nodesByLevel[level - 1].length;
+          levelOffsets[level] = levelOffsets[level - 1] + ((long)byteSizeByLevel[level - 1] * numNodesOnPrevLevel);
           GroupVIntUtil.readGroupVInts(input, nodesByLevel[level], numNodesOnLevel);
           for (int i = 1; i < numNodesOnLevel; i++) {
             nodesByLevel[level][i] += nodesByLevel[level][i - 1];
@@ -437,7 +443,8 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
           dimension,
           size,
           nodesByLevel,
-        byteSizeByLevel);
+        byteSizeByLevel,
+        levelOffsets);
     }
   }
 
@@ -453,6 +460,7 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
     int arcUpTo;
     int arc;
     private final int[] byteSizeByLevel;
+    private final long[] levelOffsets;
     // Allocated to be M*2 to track the current neighbors being explored
     private final int[] currentNeighborsBuffer;
 
@@ -465,12 +473,19 @@ public final class Lucene101HnswVectorsReader extends KnnVectorsReader
       this.entryNode = numLevels > 1 ? nodesByLevel[numLevels - 1][0] : 0;
       this.size = entry.size();
       this.currentNeighborsBuffer = new int[entry.M * 2];
+      this.levelOffsets = entry.levelOffset;
     }
 
     @Override
     public void seek(int level, int targetOrd) throws IOException {
-      int targetIndex = byteSizeByLevel[level] * targetOrd;
-      dataIn.seek(targetIndex);
+      int levelOrd = targetOrd;
+      if (level > 0) {
+        levelOrd = Arrays.binarySearch(nodesByLevel[level], targetOrd);
+        if (levelOrd < 0) {
+          throw new CorruptIndexException("node [" + targetOrd + "] not found on level [" + level +"]", dataIn);
+        }
+      }
+      dataIn.seek(levelOffsets[level] + (long)byteSizeByLevel[level] * levelOrd);
       arcCount = dataIn.readVInt();
       if (arcCount > currentNeighborsBuffer.length) {
         throw new CorruptIndexException("too many neighbors: " + arcCount, dataIn);

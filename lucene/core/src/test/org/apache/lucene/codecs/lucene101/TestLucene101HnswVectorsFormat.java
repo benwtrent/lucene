@@ -19,6 +19,7 @@ package org.apache.lucene.codecs.lucene101;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.FilterCodec;
 import org.apache.lucene.codecs.KnnVectorsFormat;
+import org.apache.lucene.codecs.lucene99.Lucene99ScalarQuantizedVectorsFormat;
 import org.apache.lucene.tests.index.BaseKnnVectorsFormatTestCase;
 import org.apache.lucene.tests.util.TestUtil;
 import org.apache.lucene.util.SameThreadExecutorService;
@@ -32,7 +33,7 @@ import static org.hamcrest.Matchers.oneOf;
 public class TestLucene101HnswVectorsFormat extends BaseKnnVectorsFormatTestCase {
   @Override
   protected Codec getCodec() {
-    return TestUtil.getDefaultCodec();
+    return TestUtil.alwaysKnnVectorsFormat(new Lucene101HnswVectorsFormat());
   }
 
   public void testToString() {
