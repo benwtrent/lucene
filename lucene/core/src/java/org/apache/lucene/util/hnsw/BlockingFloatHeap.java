@@ -17,8 +17,6 @@
 
 package org.apache.lucene.util.hnsw;
 
-import java.util.concurrent.locks.ReentrantLock;
-
 /**
  * A blocking bounded min heap that stores floats. The top element is the lowest value of the heap.
  *
@@ -31,13 +29,11 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class BlockingFloatHeap {
   private final int maxSize;
   private final float[] heap;
-  private final ReentrantLock lock;
   private int size;
 
   public BlockingFloatHeap(int maxSize) {
     this.maxSize = maxSize;
     this.heap = new float[maxSize + 1];
-    this.lock = new ReentrantLock();
     this.size = 0;
   }
 
@@ -50,19 +46,14 @@ public final class BlockingFloatHeap {
    * @return the new 'top' element in the queue.
    */
   public float offer(float value) {
-    lock.lock();
-    try {
-      if (size < maxSize) {
-        push(value);
-        return heap[1];
-      } else {
-        if (value >= heap[1]) {
-          updateTop(value);
-        }
-        return heap[1];
+    if (size < maxSize) {
+      push(value);
+      return heap[1];
+    } else {
+      if (value >= heap[1]) {
+        updateTop(value);
       }
-    } finally {
-      lock.unlock();
+      return heap[1];
     }
   }
 
@@ -76,23 +67,18 @@ public final class BlockingFloatHeap {
    * @return the new 'top' element in the queue.
    */
   public float offer(float[] values, int len) {
-    lock.lock();
-    try {
-      for (int i = len - 1; i >= 0; i--) {
-        if (size < maxSize) {
-          push(values[i]);
+    for (int i = len - 1; i >= 0; i--) {
+      if (size < maxSize) {
+        push(values[i]);
+      } else {
+        if (values[i] >= heap[1]) {
+          updateTop(values[i]);
         } else {
-          if (values[i] >= heap[1]) {
-            updateTop(values[i]);
-          } else {
-            break;
-          }
+          break;
         }
       }
-      return heap[1];
-    } finally {
-      lock.unlock();
     }
+    return heap[1];
   }
 
   /**
@@ -105,15 +91,10 @@ public final class BlockingFloatHeap {
     if (size > 0) {
       float result;
 
-      lock.lock();
-      try {
-        result = heap[1]; // save first value
-        heap[1] = heap[size]; // move last to first
-        size--;
-        downHeap(1); // adjust heap
-      } finally {
-        lock.unlock();
-      }
+      result = heap[1]; // save first value
+      heap[1] = heap[size]; // move last to first
+      size--;
+      downHeap(1); // adjust heap
       return result;
     } else {
       throw new IllegalStateException("The heap is empty");
@@ -126,12 +107,7 @@ public final class BlockingFloatHeap {
    * @return the head of the heap, the smallest value
    */
   public float peek() {
-    lock.lock();
-    try {
-      return heap[1];
-    } finally {
-      lock.unlock();
-    }
+    return heap[1];
   }
 
   /**
@@ -140,12 +116,7 @@ public final class BlockingFloatHeap {
    * @return the number of elements in this heap
    */
   public int size() {
-    lock.lock();
-    try {
-      return size;
-    } finally {
-      lock.unlock();
-    }
+    return size;
   }
 
   private void push(float element) {
