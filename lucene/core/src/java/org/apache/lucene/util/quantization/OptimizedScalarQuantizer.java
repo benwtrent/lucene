@@ -192,25 +192,17 @@ public class OptimizedScalarQuantizer {
     assert bits > 0 && bits <= 8;
     float[] intervalScratch = new float[2];
     int points = 1 << bits;
-    double vecMean = 0;
-    double vecVar = 0;
-    float norm2 = 0;
-    float centroidDot = 0;
-    float min = Float.MAX_VALUE;
-    float max = -Float.MAX_VALUE;
-    for (int i = 0; i < vector.length; ++i) {
-      if (similarityFunction != EUCLIDEAN) {
-        centroidDot += vector[i] * centroid[i];
-      }
-      vector[i] = vector[i] - centroid[i];
-      min = Math.min(min, vector[i]);
-      max = Math.max(max, vector[i]);
-      norm2 += (vector[i] * vector[i]);
-      double delta = vector[i] - vecMean;
-      vecMean += delta / (i + 1);
-      vecVar += delta * (vector[i] - vecMean);
+    float[] stats = similarityFunction == EUCLIDEAN ? new float[5] : new float[6];
+    if (similarityFunction == EUCLIDEAN) {
+      VectorUtil.centerAndCalculateOSQStatsEuclidean(vector, centroid, vector, stats);
+    } else {
+      VectorUtil.centerAndCalculateOSQStatsDp(vector, centroid, vector, stats);
     }
-    vecVar /= vector.length;
+    float vecMean = stats[0];
+    float vecVar = stats[1];
+    float norm2 = stats[2];
+    float min = stats[3];
+    float max = stats[4];
     double vecStd = Math.sqrt(vecVar);
     // Linearly scale the interval to the standard deviation of the vector, ensuring we are within
     // the min/max bounds
@@ -234,7 +226,7 @@ public class OptimizedScalarQuantizer {
     return new QuantizationResult(
         intervalScratch[0],
         intervalScratch[1],
-        similarityFunction == EUCLIDEAN ? norm2 : centroidDot,
+        similarityFunction == EUCLIDEAN ? norm2 : stats[5],
         sumQuery);
   }
 
@@ -244,25 +236,13 @@ public class OptimizedScalarQuantizer {
    *
    * @param vector raw vector
    * @param interval interval to quantize the vector
-   * @param points number of quantization points
+   * @param step step size of the quantization
+   * @param invStep inverse step size of the quantization
    * @param norm2 squared norm of the vector
    * @return the loss
    */
-  private double loss(float[] vector, float[] interval, int points, float norm2) {
-    double a = interval[0];
-    double b = interval[1];
-    double step = ((b - a) / (points - 1.0F));
-    double stepInv = 1.0 / step;
-    double xe = 0.0;
-    double e = 0.0;
-    for (double xi : vector) {
-      // this is quantizing and then dequantizing the vector
-      double xiq = (a + step * Math.round((clamp(xi, a, b) - a) * stepInv));
-      // how much does the de-quantized value differ from the original value
-      xe += xi * (xi - xiq);
-      e += (xi - xiq) * (xi - xiq);
-    }
-    return (1.0 - lambda) * xe * xe / norm2 + lambda * e;
+  private double loss(float[] vector, float[] interval, float step, float invStep, float norm2) {
+    return VectorUtil.calculateOSQLoss(vector, interval, step, invStep, norm2, lambda);
   }
 
   /**
@@ -276,30 +256,30 @@ public class OptimizedScalarQuantizer {
    * @param points number of quantization points
    */
   private void optimizeIntervals(float[] initInterval, float[] vector, float norm2, int points) {
-    double initialLoss = loss(vector, initInterval, points, norm2);
+    float a = initInterval[0];
+    float b = initInterval[1];
+    float step = ((b - a) / (points - 1.0F));
+    float stepInv = 1f / step;
+    double initialLoss =
+        VectorUtil.calculateOSQLoss(vector, initInterval, step, stepInv, norm2, lambda);
     final float scale = (1.0f - lambda) / norm2;
     if (Float.isFinite(scale) == false) {
       return;
     }
+    float[] gridPoints = new float[5];
     for (int i = 0; i < iters; ++i) {
-      float a = initInterval[0];
-      float b = initInterval[1];
-      float stepInv = (points - 1.0f) / (b - a);
+      a = initInterval[0];
+      b = initInterval[1];
+      step = ((b - a) / (points - 1.0F));
+      stepInv = 1f / step;
       // calculate the grid points for coordinate descent
-      double daa = 0;
-      double dab = 0;
-      double dbb = 0;
-      double dax = 0;
-      double dbx = 0;
-      for (float xi : vector) {
-        float k = Math.round((clamp(xi, a, b) - a) * stepInv);
-        float s = k / (points - 1);
-        daa += (1.0 - s) * (1.0 - s);
-        dab += (1.0 - s) * s;
-        dbb += s * s;
-        dax += xi * (1.0 - s);
-        dbx += xi * s;
-      }
+
+      VectorUtil.calculateOSQGridPoints(vector, initInterval, points, stepInv, gridPoints);
+      float daa = gridPoints[0];
+      float dab = gridPoints[1];
+      float dbb = gridPoints[2];
+      float dax = gridPoints[3];
+      float dbx = gridPoints[4];
       double m0 = scale * dax * dax + lambda * daa;
       double m1 = scale * dax * dbx + lambda * dab;
       double m2 = scale * dbx * dbx + lambda * dbb;
@@ -314,7 +294,9 @@ public class OptimizedScalarQuantizer {
       if ((Math.abs(initInterval[0] - aOpt) < 1e-8 && Math.abs(initInterval[1] - bOpt) < 1e-8)) {
         return;
       }
-      double newLoss = loss(vector, new float[] {aOpt, bOpt}, points, norm2);
+      double newLoss =
+          VectorUtil.calculateOSQLoss(
+              vector, new float[] {aOpt, bOpt}, step, stepInv, norm2, lambda);
       // If the new loss is worse, don't update the interval and exit
       // This optimization, unlike kMeans, does not always converge to better loss
       // So exit if we are getting worse

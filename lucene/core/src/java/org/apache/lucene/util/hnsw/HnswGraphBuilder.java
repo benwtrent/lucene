@@ -585,6 +585,14 @@ public class HnswGraphBuilder implements HnswBuilder {
     }
 
     @Override
+    public void incVisitedClusterCount(int count) {}
+
+    @Override
+    public long visitedClusterCount() {
+      return 0;
+    }
+
+    @Override
     public long visitedCount() {
       return visitedCount;
     }

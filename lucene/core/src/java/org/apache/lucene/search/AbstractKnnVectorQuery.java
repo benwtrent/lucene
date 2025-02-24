@@ -49,8 +49,10 @@ import org.apache.lucene.util.Bits;
  *   <li>Otherwise run a kNN search subject to the filter
  *   <li>If the kNN search visits too many vectors without completing, stop and run an exact search
  * </ul>
+ *
+ * @lucene.experimental
  */
-abstract class AbstractKnnVectorQuery extends Query {
+public abstract class AbstractKnnVectorQuery extends Query {
 
   private static final TopDocs NO_RESULTS = TopDocsCollector.EMPTY_TOPDOCS;
 
@@ -59,7 +61,8 @@ abstract class AbstractKnnVectorQuery extends Query {
   protected final Query filter;
   protected final KnnSearchStrategy searchStrategy;
 
-  AbstractKnnVectorQuery(String field, int k, Query filter, KnnSearchStrategy searchStrategy) {
+  public AbstractKnnVectorQuery(
+      String field, int k, Query filter, KnnSearchStrategy searchStrategy) {
     this.field = Objects.requireNonNull(field, "field");
     this.k = k;
     if (k < 1) {
@@ -86,11 +89,9 @@ abstract class AbstractKnnVectorQuery extends Query {
       filterWeight = null;
     }
 
-    TimeLimitingKnnCollectorManager knnCollectorManager =
-        new TimeLimitingKnnCollectorManager(
-            getKnnCollectorManager(k, indexSearcher), indexSearcher.getTimeout());
     TaskExecutor taskExecutor = indexSearcher.getTaskExecutor();
     List<LeafReaderContext> leafReaderContexts = reader.leaves();
+    KnnCollectorManager knnCollectorManager = getKnnCollectorManager(k, indexSearcher);
     List<Callable<TopDocs>> tasks = new ArrayList<>(leafReaderContexts.size());
     for (LeafReaderContext context : leafReaderContexts) {
       tasks.add(() -> searchLeaf(context, filterWeight, knnCollectorManager));
@@ -106,11 +107,9 @@ abstract class AbstractKnnVectorQuery extends Query {
   }
 
   private TopDocs searchLeaf(
-      LeafReaderContext ctx,
-      Weight filterWeight,
-      TimeLimitingKnnCollectorManager timeLimitingKnnCollectorManager)
+      LeafReaderContext ctx, Weight filterWeight, KnnCollectorManager knnCollectorManager)
       throws IOException {
-    TopDocs results = getLeafResults(ctx, filterWeight, timeLimitingKnnCollectorManager);
+    TopDocs results = getLeafResults(ctx, filterWeight, knnCollectorManager);
     if (ctx.docBase > 0) {
       for (ScoreDoc scoreDoc : results.scoreDocs) {
         scoreDoc.doc += ctx.docBase;
@@ -120,15 +119,13 @@ abstract class AbstractKnnVectorQuery extends Query {
   }
 
   private TopDocs getLeafResults(
-      LeafReaderContext ctx,
-      Weight filterWeight,
-      TimeLimitingKnnCollectorManager timeLimitingKnnCollectorManager)
+      LeafReaderContext ctx, Weight filterWeight, KnnCollectorManager knnCollectorManager)
       throws IOException {
     final LeafReader reader = ctx.reader();
     final Bits liveDocs = reader.getLiveDocs();
 
     if (filterWeight == null) {
-      return approximateSearch(ctx, liveDocs, Integer.MAX_VALUE, timeLimitingKnnCollectorManager);
+      return approximateSearch(ctx, liveDocs, Integer.MAX_VALUE, knnCollectorManager);
     }
 
     Scorer scorer = filterWeight.scorer(ctx);
@@ -138,7 +135,11 @@ abstract class AbstractKnnVectorQuery extends Query {
 
     BitSet acceptDocs = createBitSet(scorer.iterator(), liveDocs, reader.maxDoc());
     final int cost = acceptDocs.cardinality();
-    QueryTimeout queryTimeout = timeLimitingKnnCollectorManager.getQueryTimeout();
+    QueryTimeout queryTimeout = null;
+    if (knnCollectorManager
+        instanceof TimeLimitingKnnCollectorManager timeLimitingKnnCollectorManager) {
+      queryTimeout = timeLimitingKnnCollectorManager.getQueryTimeout();
+    }
 
     if (cost <= k) {
       // If there are <= k possible matches, short-circuit and perform exact search, since HNSW
@@ -148,7 +149,7 @@ abstract class AbstractKnnVectorQuery extends Query {
 
     // Perform the approximate kNN search
     // We pass cost + 1 here to account for the edge case when we explore exactly cost vectors
-    TopDocs results = approximateSearch(ctx, acceptDocs, cost + 1, timeLimitingKnnCollectorManager);
+    TopDocs results = approximateSearch(ctx, acceptDocs, cost + 1, knnCollectorManager);
     if ((results.totalHits.relation() == TotalHits.Relation.EQUAL_TO
             // We know that there are more than `k` available docs, if we didn't even get `k`
             // something weird
@@ -181,7 +182,8 @@ abstract class AbstractKnnVectorQuery extends Query {
     }
   }
 
-  protected KnnCollectorManager getKnnCollectorManager(int k, IndexSearcher searcher) {
+  protected KnnCollectorManager getKnnCollectorManager(int k, IndexSearcher searcher)
+      throws IOException {
     return new TopKnnCollectorManager(k, searcher);
   }
 

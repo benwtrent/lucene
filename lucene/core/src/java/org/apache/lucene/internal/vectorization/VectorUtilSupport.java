@@ -65,4 +65,16 @@ public interface VectorUtilSupport {
    * @return the dot product
    */
   long int4BitDotProduct(byte[] int4Quantized, byte[] binaryQuantized);
+
+  float calculateOSQLoss(
+      float[] target, float[] interval, float step, float invStep, float norm2, float lambda);
+
+  void calculateOSQGridPoints(
+      float[] target, float[] interval, int points, float invStep, float[] pts);
+
+  void centerAndCalculateOSQStatsEuclidean(
+      float[] target, float[] centroid, float[] centered, float[] stats);
+
+  void centerAndCalculateOSQStatsDp(
+      float[] target, float[] centroid, float[] centered, float[] stats);
 }

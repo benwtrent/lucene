@@ -43,6 +43,10 @@ public interface KnnCollector {
    */
   void incVisitedCount(int count);
 
+  void incVisitedClusterCount(int count);
+
+  long visitedClusterCount();
+
   /**
    * @return the current visited vector count
    */
@@ -114,6 +118,16 @@ public interface KnnCollector {
     @Override
     public void incVisitedCount(int count) {
       collector.incVisitedCount(count);
+    }
+
+    @Override
+    public void incVisitedClusterCount(int count) {
+      collector.incVisitedClusterCount(count);
+    }
+
+    @Override
+    public long visitedClusterCount() {
+      return collector.visitedClusterCount();
     }
 
     @Override

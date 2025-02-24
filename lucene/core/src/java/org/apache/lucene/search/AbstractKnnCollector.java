@@ -26,6 +26,7 @@ import org.apache.lucene.search.knn.KnnSearchStrategy;
 public abstract class AbstractKnnCollector implements KnnCollector {
 
   protected long visitedCount;
+  protected long clusterCount;
   private final long visitLimit;
   private final KnnSearchStrategy searchStrategy;
   private final int k;
@@ -49,6 +50,17 @@ public abstract class AbstractKnnCollector implements KnnCollector {
   public final void incVisitedCount(int count) {
     assert count > 0;
     this.visitedCount += count;
+  }
+
+  @Override
+  public void incVisitedClusterCount(int count) {
+    assert count > 0;
+    this.clusterCount += count;
+  }
+
+  @Override
+  public long visitedClusterCount() {
+    return clusterCount;
   }
 
   @Override

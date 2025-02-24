@@ -122,7 +122,8 @@ public class SeededKnnVectorQuery extends AbstractKnnVectorQuery {
   }
 
   @Override
-  protected KnnCollectorManager getKnnCollectorManager(int k, IndexSearcher searcher) {
+  protected KnnCollectorManager getKnnCollectorManager(int k, IndexSearcher searcher)
+      throws IOException {
     return delegate.getKnnCollectorManager(k, searcher);
   }
 

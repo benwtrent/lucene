@@ -1937,8 +1937,19 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
       VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT
     };
     for (VectorSimilarityFunction similarity : functions) {
+      if (supportsSimilarity(similarity) == false) {
+        continue;
+      }
       assertRecall(similarity, 0.5, 1.0);
     }
+  }
+
+  protected boolean supportsSimilarity(VectorSimilarityFunction similarity) {
+    return true;
+  }
+
+  protected float oversampleDefault() {
+    return 1.0f;
   }
 
   protected void assertRecall(VectorSimilarityFunction similarity, double min, double max)
@@ -1974,7 +1985,8 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
 
         KnnFloatVectorQuery query = new KnnFloatVectorQuery("field", queryEmbedding, efSearch);
         assertEquals(efSearch, searcher.count(query)); // Expect some results without timeout
-        TopDocs results = searcher.search(query, topK);
+        TopDocs results =
+            searcher.search(query, (int) Math.min(topK * oversampleDefault(), efSearch));
         Set<Integer> resultDocs = new HashSet<>();
         int i = 0;
         for (ScoreDoc scoreDoc : results.scoreDocs) {

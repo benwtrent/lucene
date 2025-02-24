@@ -13,6 +13,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ * with modifications:
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
  */
 package org.apache.lucene.internal.vectorization;
 
@@ -22,6 +27,8 @@ import static jdk.incubator.vector.VectorOperators.ADD;
 import static jdk.incubator.vector.VectorOperators.B2I;
 import static jdk.incubator.vector.VectorOperators.B2S;
 import static jdk.incubator.vector.VectorOperators.LSHR;
+import static jdk.incubator.vector.VectorOperators.MAX;
+import static jdk.incubator.vector.VectorOperators.MIN;
 import static jdk.incubator.vector.VectorOperators.S2I;
 import static jdk.incubator.vector.VectorOperators.ZERO_EXTEND_B2S;
 
@@ -906,5 +913,232 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
       subRet3 += Integer.bitCount((dValue & q[i + 3 * d.length]) & 0xFF);
     }
     return subRet0 + (subRet1 << 1) + (subRet2 << 2) + (subRet3 << 3);
+  }
+
+  @Override
+  public void centerAndCalculateOSQStatsEuclidean(
+      float[] vector, float[] centroid, float[] centered, float[] stats) {
+    float vecMean = 0;
+    float vecVar = 0;
+    float norm2 = 0;
+    float min = Float.MAX_VALUE;
+    float max = -Float.MAX_VALUE;
+    int i = 0;
+    if (vector.length > 2 * FLOAT_SPECIES.length()) {
+      FloatVector vecMeanVec = FloatVector.zero(FLOAT_SPECIES);
+      FloatVector m2Vec = FloatVector.zero(FLOAT_SPECIES);
+      FloatVector norm2Vec = FloatVector.zero(FLOAT_SPECIES);
+      FloatVector minVec = FloatVector.broadcast(FLOAT_SPECIES, Float.MAX_VALUE);
+      FloatVector maxVec = FloatVector.broadcast(FLOAT_SPECIES, -Float.MAX_VALUE);
+      FloatVector countVec = FloatVector.broadcast(FLOAT_SPECIES, 0);
+      for (; i < FLOAT_SPECIES.loopBound(vector.length); i += FLOAT_SPECIES.length()) {
+        FloatVector v = FloatVector.fromArray(FLOAT_SPECIES, vector, i);
+        FloatVector c = FloatVector.fromArray(FLOAT_SPECIES, centroid, i);
+        FloatVector centeredVec = v.sub(c);
+        FloatVector deltaVec = centeredVec.sub(vecMeanVec);
+        countVec = countVec.add(FloatVector.broadcast(FLOAT_SPECIES, 1));
+        norm2Vec = norm2Vec.add(centeredVec.mul(centeredVec));
+        vecMeanVec = vecMeanVec.add(deltaVec.div(countVec));
+        m2Vec = m2Vec.add(deltaVec.mul(centeredVec.sub(vecMeanVec)));
+        minVec = minVec.min(centeredVec);
+        maxVec = maxVec.max(centeredVec);
+        centeredVec.intoArray(centered, i);
+      }
+      min = minVec.reduceLanes(MIN);
+      max = maxVec.reduceLanes(MAX);
+      norm2 = norm2Vec.reduceLanes(ADD);
+      vecMean = vecMeanVec.reduceLanes(ADD) / FLOAT_SPECIES.length();
+      vecVar = m2Vec.reduceLanes(ADD) / countVec.reduceLanes(ADD);
+    }
+
+    float tailVecVar = 0;
+    // handle the tail
+    for (; i < vector.length; i++) {
+      centered[i] = vector[i] - centroid[i];
+      float delta = centered[i] - vecMean;
+      vecMean += delta / (i + 1);
+      tailVecVar = fma(delta, (centered[i] - vecMean), tailVecVar);
+      min = Math.min(min, centered[i]);
+      max = Math.max(max, centered[i]);
+      norm2 = fma(centered[i], centered[i], norm2);
+    }
+    stats[0] = vecMean;
+    // TODO this ain' correct, but I am not sure what to do
+    stats[1] = tailVecVar / vector.length + vecVar;
+    stats[2] = norm2;
+    stats[3] = min;
+    stats[4] = max;
+  }
+
+  @Override
+  public void centerAndCalculateOSQStatsDp(
+      float[] vector, float[] centroid, float[] centered, float[] stats) {
+    float vecMean = 0;
+    float vecVar = 0;
+    float norm2 = 0;
+    float min = Float.MAX_VALUE;
+    float max = -Float.MAX_VALUE;
+    float centroidDot = 0;
+    int i = 0;
+    int loopBound = FLOAT_SPECIES.loopBound(vector.length);
+    if (vector.length > 2 * FLOAT_SPECIES.length()) {
+      FloatVector vecMeanVec = FloatVector.zero(FLOAT_SPECIES);
+      FloatVector m2Vec = FloatVector.zero(FLOAT_SPECIES);
+      FloatVector norm2Vec = FloatVector.zero(FLOAT_SPECIES);
+      FloatVector minVec = FloatVector.broadcast(FLOAT_SPECIES, Float.MAX_VALUE);
+      FloatVector maxVec = FloatVector.broadcast(FLOAT_SPECIES, -Float.MAX_VALUE);
+      FloatVector countVec = FloatVector.broadcast(FLOAT_SPECIES, 0);
+      FloatVector centroidDotVec = FloatVector.zero(FLOAT_SPECIES);
+      for (; i < loopBound; i += FLOAT_SPECIES.length()) {
+        FloatVector v = FloatVector.fromArray(FLOAT_SPECIES, vector, i);
+        FloatVector c = FloatVector.fromArray(FLOAT_SPECIES, centroid, i);
+        centroidDotVec = centroidDotVec.add(v.mul(c));
+        FloatVector centeredVec = v.sub(c);
+        FloatVector deltaVec = centeredVec.sub(vecMeanVec);
+        countVec = countVec.add(FloatVector.broadcast(FLOAT_SPECIES, 1));
+        norm2Vec = norm2Vec.add(centeredVec.mul(centeredVec));
+        vecMeanVec = vecMeanVec.add(deltaVec.div(countVec));
+        // var
+        FloatVector delta2Vec = centeredVec.sub(vecMeanVec);
+        m2Vec = m2Vec.add(deltaVec.mul(delta2Vec));
+        minVec = minVec.min(centeredVec);
+        maxVec = maxVec.max(centeredVec);
+        centeredVec.intoArray(centered, i);
+      }
+      min = minVec.reduceLanes(MIN);
+      max = maxVec.reduceLanes(MAX);
+      norm2 = norm2Vec.reduceLanes(ADD);
+      centroidDot = centroidDotVec.reduceLanes(ADD);
+      vecMean = vecMeanVec.reduceLanes(ADD) / FLOAT_SPECIES.length();
+      // Is it this simple? I would have thought we need to
+      vecVar = m2Vec.reduceLanes(ADD) / countVec.reduceLanes(ADD);
+    }
+
+    float tailVecVar = 0;
+
+    // handle the tail
+    for (; i < vector.length; i++) {
+      centroidDot = fma(vector[i], centroid[i], centroidDot);
+      centered[i] = vector[i] - centroid[i];
+      float delta = centered[i] - vecMean;
+      vecMean += delta / (i + 1);
+      tailVecVar = fma(delta, (centered[i] - vecMean), tailVecVar);
+      min = Math.min(min, centered[i]);
+      max = Math.max(max, centered[i]);
+      norm2 = fma(centered[i], centered[i], norm2);
+    }
+    stats[0] = vecMean;
+    // TODO this ain' correct, but I am not sure what to do
+    stats[1] = tailVecVar / vector.length + vecVar;
+    stats[2] = norm2;
+    stats[3] = min;
+    stats[4] = max;
+    stats[5] = centroidDot;
+  }
+
+  @Override
+  public void calculateOSQGridPoints(
+      float[] target, float[] interval, int points, float invStep, float[] pts) {
+    float a = interval[0];
+    float b = interval[1];
+    int i = 0;
+    float daa = 0;
+    float dab = 0;
+    float dbb = 0;
+    float dax = 0;
+    float dbx = 0;
+
+    FloatVector daaVec = FloatVector.zero(FLOAT_SPECIES);
+    FloatVector dabVec = FloatVector.zero(FLOAT_SPECIES);
+    FloatVector dbbVec = FloatVector.zero(FLOAT_SPECIES);
+    FloatVector daxVec = FloatVector.zero(FLOAT_SPECIES);
+    FloatVector dbxVec = FloatVector.zero(FLOAT_SPECIES);
+
+    // if the array size is large (> 2x platform vector size), it's worth the overhead to vectorize
+    if (target.length > 2 * FLOAT_SPECIES.length()) {
+      FloatVector ones = FloatVector.broadcast(FLOAT_SPECIES, 1f);
+      FloatVector pmOnes = FloatVector.broadcast(FLOAT_SPECIES, points - 1f);
+      for (; i < FLOAT_SPECIES.loopBound(target.length); i += FLOAT_SPECIES.length()) {
+        FloatVector v = FloatVector.fromArray(FLOAT_SPECIES, target, i);
+        FloatVector vClamped = v.max(a).min(b);
+        FloatVector kVec =
+            vClamped
+                .sub(a)
+                .mul(invStep)
+                // round
+                .add(0.5f)
+                .convert(VectorOperators.F2I, 0)
+                .convert(VectorOperators.I2F, 0)
+                .reinterpretAsFloats();
+        FloatVector sVec = kVec.div(pmOnes);
+        FloatVector smVec = ones.sub(sVec);
+        daaVec = daaVec.add(smVec.mul(smVec));
+        dabVec = dabVec.add(smVec.mul(sVec));
+        dbbVec = dbbVec.add(sVec.mul(sVec));
+        daxVec = daxVec.add(v.mul(smVec));
+        dbxVec = dbxVec.add(v.mul(sVec));
+      }
+      daa = daaVec.reduceLanes(ADD);
+      dab = dabVec.reduceLanes(ADD);
+      dbb = dbbVec.reduceLanes(ADD);
+      dax = daxVec.reduceLanes(ADD);
+      dbx = dbxVec.reduceLanes(ADD);
+    }
+
+    for (; i < target.length; i++) {
+      float k = Math.round((Math.min(Math.max(target[i], a), b) - a) * invStep);
+      float s = k / (points - 1);
+      float ms = 1f - s;
+      daa = fma(ms, ms, daa);
+      dab = fma(ms, s, dab);
+      dbb = fma(s, s, dbb);
+      dax = fma(ms, target[i], dax);
+      dbx = fma(s, target[i], dbx);
+    }
+
+    pts[0] = daa;
+    pts[1] = dab;
+    pts[2] = dbb;
+    pts[3] = dax;
+    pts[4] = dbx;
+  }
+
+  @Override
+  public float calculateOSQLoss(
+      float[] target, float[] interval, float step, float invStep, float norm2, float lambda) {
+    float a = interval[0];
+    float b = interval[1];
+    float xe = 0f;
+    float e = 0f;
+    FloatVector xeVec = FloatVector.zero(FLOAT_SPECIES);
+    FloatVector eVec = FloatVector.zero(FLOAT_SPECIES);
+    int i = 0;
+    // if the array size is large (> 2x platform vector size), it's worth the overhead to vectorize
+    if (target.length > 2 * FLOAT_SPECIES.length()) {
+      for (; i < FLOAT_SPECIES.loopBound(target.length); i += FLOAT_SPECIES.length()) {
+        FloatVector v = FloatVector.fromArray(FLOAT_SPECIES, target, i);
+        FloatVector vClamped = v.max(a).min(b);
+        Vector<Integer> xiqint =
+            vClamped.sub(a).mul(invStep).add(0.5f).convert(VectorOperators.F2I, 0);
+        FloatVector xiq =
+            xiqint.convert(VectorOperators.I2F, 0).reinterpretAsFloats().mul(step).add(a);
+        FloatVector xiiq = v.sub(xiq);
+        FloatVector xiiq2 = xiiq.mul(xiiq);
+        xeVec = xeVec.add(xiiq.mul(v));
+        eVec = eVec.add(xiiq2);
+      }
+      e = eVec.reduceLanes(ADD);
+      xe = xeVec.reduceLanes(ADD);
+    }
+
+    for (; i < target.length; i++) {
+      // this is quantizing and then dequantizing the vector
+      float xiq = fma(step, Math.round((Math.min(Math.max(target[i], a), b) - a) * invStep), a);
+      // how much does the de-quantized value differ from the original value
+      float xiiq = target[i] - xiq;
+      e = fma(xiiq, xiiq, e);
+      xe = fma(target[i], xiiq, xe);
+    }
+    return (1f - lambda) * xe * xe / norm2 + lambda * e;
   }
 }

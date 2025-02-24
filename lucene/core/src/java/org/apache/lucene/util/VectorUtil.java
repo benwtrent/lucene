@@ -334,4 +334,31 @@ public final class VectorUtil {
     assert IntStream.range(0, to - 1).noneMatch(i -> buffer[i] > buffer[i + 1]);
     return IMPL.findNextGEQ(buffer, target, from, to);
   }
+
+  public static float calculateOSQLoss(
+      float[] target, float[] interval, float step, float invStep, float norm2, float lambda) {
+    assert interval.length == 2;
+    return IMPL.calculateOSQLoss(target, interval, step, invStep, norm2, lambda);
+  }
+
+  public static void calculateOSQGridPoints(
+      float[] target, float[] interval, int points, float invStep, float[] pts) {
+    assert interval.length == 2;
+    assert pts.length == 5;
+    IMPL.calculateOSQGridPoints(target, interval, points, invStep, pts);
+  }
+
+  public static void centerAndCalculateOSQStatsEuclidean(
+      float[] target, float[] centroid, float[] centered, float[] stats) {
+    assert target.length == centroid.length;
+    assert stats.length == 5;
+    IMPL.centerAndCalculateOSQStatsEuclidean(target, centroid, centered, stats);
+  }
+
+  public static void centerAndCalculateOSQStatsDp(
+      float[] target, float[] centroid, float[] centered, float[] stats) {
+    assert target.length == centroid.length;
+    assert stats.length == 6;
+    IMPL.centerAndCalculateOSQStatsDp(target, centroid, centered, stats);
+  }
 }

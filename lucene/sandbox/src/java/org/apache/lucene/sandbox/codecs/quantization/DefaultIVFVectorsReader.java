@@ -1,0 +1,365 @@
+/*
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the Elastic License
+ * 2.0; you may not use this file except in compliance with the Elastic License
+ * 2.0.
+ */
+package org.apache.lucene.sandbox.codecs.quantization;
+
+import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.QUERY_BITS;
+import static org.apache.lucene.index.VectorSimilarityFunction.COSINE;
+import static org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
+import static org.apache.lucene.index.VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT;
+import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.discretize;
+import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.transposeHalfByte;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import org.apache.lucene.codecs.hnsw.FlatVectorsReader;
+import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.FloatVectorValues;
+import org.apache.lucene.index.SegmentReadState;
+import org.apache.lucene.index.VectorSimilarityFunction;
+import org.apache.lucene.sandbox.search.knn.IVFKnnSearchStrategy;
+import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.KnnCollector;
+import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.util.ArrayUtil;
+import org.apache.lucene.util.BitSet;
+import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.GroupVIntUtil;
+import org.apache.lucene.util.PriorityQueue;
+import org.apache.lucene.util.VectorUtil;
+import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
+
+/**
+ * Default implementation of {@link IVFVectorsReader}. It scores the posting lists centroids using
+ * brute force and then scores the top ones using the posting list.
+ *
+ * @lucene.experimental
+ */
+public class DefaultIVFVectorsReader extends IVFVectorsReader {
+  private static final float FOUR_BIT_SCALE = 1f / ((1 << 4) - 1);
+
+  public DefaultIVFVectorsReader(SegmentReadState state, FlatVectorsReader rawVectorsReader)
+      throws IOException {
+    super(state, rawVectorsReader);
+  }
+
+  @Override
+  protected IVFUtils.CentroidQueryScorer getCentroidScorer(
+      FieldInfo fieldInfo, int numCentroids, IndexInput centroids, float[] target)
+      throws IOException {
+    return new IVFUtils.CentroidQueryScorer() {
+      int currentCentroid = -1;
+      private final float[] centroid = new float[fieldInfo.getVectorDimension()];
+
+      @Override
+      public int size() {
+        return numCentroids;
+      }
+
+      @Override
+      public float[] centroid(int centroidOrdinal) throws IOException {
+        if (centroidOrdinal == currentCentroid) {
+          return centroid;
+        }
+        centroids.seek(centroidOrdinal * Float.BYTES * fieldInfo.getVectorDimension());
+        centroids.readFloats(centroid, 0, centroid.length);
+        return centroid;
+      }
+
+      @Override
+      public float score(int centroidOrdinal) throws IOException {
+        float[] centroid = centroid(centroidOrdinal);
+        return fieldInfo.getVectorSimilarityFunction().compare(centroid, target);
+      }
+    };
+  }
+
+  @Override
+  protected FloatVectorValues getCentroids(IndexInput indexInput, int numCentroids, FieldInfo info)
+      throws IOException {
+    return new OffHeapCentroidFloatVectorValues(
+        numCentroids, indexInput, info.getVectorDimension());
+  }
+
+  @Override
+  protected Iterator<PostingListWithFileOffsetWithScore> scorePostingLists(
+      FieldInfo fieldInfo,
+      KnnCollector knnCollector,
+      IVFUtils.CentroidQueryScorer centroidQueryScorer,
+      int nProbe)
+      throws IOException {
+    List<Integer> preferredCentroids = null;
+    if (knnCollector.getSearchStrategy() instanceof IVFKnnSearchStrategy searchStrategy) {
+      preferredCentroids = searchStrategy.getCentroids();
+    }
+    if (preferredCentroids != null && preferredCentroids.isEmpty()) {
+      return Arrays.stream(new PostingListWithFileOffsetWithScore[0]).iterator();
+    }
+    int centroidsToReturn = nProbe;
+    if (centroidsToReturn <= 0) {
+      centroidsToReturn = Math.max(((knnCollector.k() * 100) / 10_000), 1);
+    }
+    if (preferredCentroids != null) {
+      centroidsToReturn = Math.min(centroidsToReturn, preferredCentroids.size());
+    }
+    FieldEntry fieldEntry = fields.get(fieldInfo.number);
+    // TODO: improve the heuristic here. It does not work they there are many deleted documents or
+    // restrictive filter.
+    final int postingListsToScore =
+        preferredCentroids == null
+            ? Math.min(centroidQueryScorer.size(), centroidsToReturn)
+            : centroidsToReturn;
+    final PriorityQueue<PostingListWithFileOffsetWithScore> pq =
+        new PriorityQueue<>(postingListsToScore) {
+          @Override
+          protected boolean lessThan(
+              PostingListWithFileOffsetWithScore a, PostingListWithFileOffsetWithScore b) {
+            return a.score() < b.score();
+          }
+        };
+    if (preferredCentroids != null) {
+      for (int centroid : preferredCentroids) {
+        knnCollector.incVisitedClusterCount(1);
+        float score = centroidQueryScorer.score(centroid);
+        pq.insertWithOverflow(
+            new PostingListWithFileOffsetWithScore(
+                new PostingListWithFileOffset(
+                    centroid, fieldEntry.postingListOffsetsAndLengths()[centroid]),
+                score));
+      }
+    } else {
+      for (int centroid = 0; centroid < centroidQueryScorer.size(); centroid++) {
+        knnCollector.incVisitedClusterCount(1);
+        float score = centroidQueryScorer.score(centroid);
+        pq.insertWithOverflow(
+            new PostingListWithFileOffsetWithScore(
+                new PostingListWithFileOffset(
+                    centroid, fieldEntry.postingListOffsetsAndLengths()[centroid]),
+                score));
+      }
+    }
+
+    final PostingListWithFileOffsetWithScore[] topCentroids =
+        new PostingListWithFileOffsetWithScore[postingListsToScore];
+    for (int i = 1; i <= postingListsToScore; i++) {
+      topCentroids[postingListsToScore - i] = pq.pop();
+    }
+    return Arrays.stream(topCentroids).iterator();
+  }
+
+  static void prefixSum(int[] buffer, int count) {
+    for (int i = 1; i < count; ++i) {
+      buffer[i] += buffer[i - 1];
+    }
+  }
+
+  @Override
+  protected IVFUtils.PostingsScorer getPostingScorer(
+      FieldInfo fieldInfo, IndexInput indexInput, float[] target) throws IOException {
+    int discretizedDimensions = discretize(fieldInfo.getVectorDimension(), 64);
+    float[] scratch = new float[target.length];
+    byte[] quantizationScratch = new byte[target.length];
+    byte[] quantizedQueryScratch = new byte[QUERY_BITS * discretizedDimensions / 8];
+    OptimizedScalarQuantizer quantizer =
+        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    byte[] quantizedBits = new byte[discretizedDimensions / 8];
+    float[] correctiveValues = new float[3];
+
+    FieldEntry entry = fields.get(fieldInfo.number);
+
+    return new IVFUtils.PostingsScorer() {
+      final long quantizedByteLength = quantizedBits.length + (Float.BYTES * 3) + Short.BYTES;
+      int[] docIdsScratch = new int[0];
+      IndexInput postingsSlice;
+      int vectors;
+      boolean quantized = false;
+      float centroidDp;
+      float[] centroid;
+      int pos;
+      long slicePos;
+      OptimizedScalarQuantizer.QuantizationResult queryCorrections;
+
+      @Override
+      public DocIdSetIterator resetPostingsScorer(int centroidOrdinal, float[] centroid)
+          throws IOException {
+        quantized = false;
+        postingsSlice = entry.postingsSlice(indexInput, centroidOrdinal);
+        vectors = postingsSlice.readVInt();
+        centroidDp = Float.intBitsToFloat(postingsSlice.readInt());
+        this.centroid = centroid;
+        // read the doc ids
+        docIdsScratch =
+            vectors > docIdsScratch.length
+                ? ArrayUtil.growExact(docIdsScratch, vectors)
+                : docIdsScratch;
+        GroupVIntUtil.readGroupVInts(postingsSlice, docIdsScratch, vectors);
+        prefixSum(docIdsScratch, vectors);
+        slicePos = postingsSlice.getFilePointer();
+        pos = -1;
+        return new DocIdSetIterator() {
+
+          @Override
+          public int docID() {
+            return docIdsScratch[pos];
+          }
+
+          @Override
+          public int nextDoc() throws IOException {
+            pos++;
+            if (pos < vectors) {
+              return docID();
+            }
+            return NO_MORE_DOCS;
+          }
+
+          @Override
+          public int advance(int target) throws IOException {
+            return slowAdvance(target);
+          }
+
+          @Override
+          public long cost() {
+            return vectors;
+          }
+        };
+      }
+
+      @Override
+      public float score() throws IOException {
+        if (quantized == false) {
+          System.arraycopy(target, 0, scratch, 0, target.length);
+          if (fieldInfo.getVectorSimilarityFunction() == COSINE) {
+            VectorUtil.l2normalize(scratch);
+          }
+          queryCorrections =
+              quantizer.scalarQuantize(scratch, quantizationScratch, (byte) 4, centroid);
+          transposeHalfByte(quantizationScratch, quantizedQueryScratch);
+          quantized = true;
+        }
+        postingsSlice.seek(slicePos + pos * quantizedByteLength);
+        postingsSlice.readBytes(quantizedBits, 0, quantizedBits.length);
+        postingsSlice.readFloats(correctiveValues, 0, correctiveValues.length);
+        int quantizedComponentSum = Short.toUnsignedInt(postingsSlice.readShort());
+        return quantizedScore(
+            quantizedQueryScratch,
+            queryCorrections,
+            fieldInfo.getVectorDimension(),
+            quantizedBits,
+            correctiveValues,
+            quantizedComponentSum,
+            centroidDp,
+            fieldInfo.getVectorSimilarityFunction());
+      }
+    };
+  }
+
+  @Override
+  protected void scorePostingList(
+      FieldInfo fieldInfo,
+      DocIdSetIterator docIdSetIterator,
+      IVFUtils.PostingsScorer scorer,
+      KnnCollector knnCollector,
+      BitSet visitedDocs,
+      Bits acceptDocs)
+      throws IOException {
+    // iterate docs
+    while (docIdSetIterator.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+      int docId = docIdSetIterator.docID();
+      if (visitedDocs.getAndSet(docId)) {
+        continue;
+      }
+      if (acceptDocs != null && acceptDocs.get(docId) == false) {
+        continue;
+      }
+      if (knnCollector.earlyTerminated()) {
+        return;
+      }
+      knnCollector.incVisitedCount(1);
+      float score = scorer.score();
+      knnCollector.collect(docId, score);
+    }
+  }
+
+  static float quantizedScore(
+      byte[] quantizedQuery,
+      OptimizedScalarQuantizer.QuantizationResult queryCorrections,
+      int dims,
+      byte[] binaryCode,
+      float[] targetCorrections,
+      int targetComponentSum,
+      float centroidDp,
+      VectorSimilarityFunction similarityFunction) {
+    float qcDist = VectorUtil.int4BitDotProduct(quantizedQuery, binaryCode);
+    float x1 = targetComponentSum;
+    float ax = targetCorrections[0];
+    // Here we assume `lx` is simply bit vectors, so the scaling isn't necessary
+    float lx = targetCorrections[1] - ax;
+    float ay = queryCorrections.lowerInterval();
+    float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
+    float y1 = queryCorrections.quantizedComponentSum();
+    float score = ax * ay * dims + ay * lx * x1 + ax * ly * y1 + lx * ly * qcDist;
+    // For euclidean, we need to invert the score and apply the additional correction, which is
+    // assumed to be the squared l2norm of the centroid centered vectors.
+    if (similarityFunction == EUCLIDEAN) {
+      score = queryCorrections.additionalCorrection() + targetCorrections[2] - 2 * score;
+      return Math.max(1 / (1f + score), 0);
+    } else {
+      // For cosine and max inner product, we need to apply the additional correction, which is
+      // assumed to be the non-centered dot-product between the vector and the centroid
+      score += queryCorrections.additionalCorrection() + targetCorrections[2] - centroidDp;
+      if (similarityFunction == MAXIMUM_INNER_PRODUCT) {
+        return VectorUtil.scaleMaxInnerProductScore(score);
+      }
+      return Math.max((1f + score) / 2f, 0);
+    }
+  }
+
+  static class OffHeapCentroidFloatVectorValues extends FloatVectorValues {
+    private final int numCentroids;
+    private final IndexInput input;
+    private final int dimension;
+    private final float[] scratch;
+    private int ord = -1;
+
+    OffHeapCentroidFloatVectorValues(int numCentroids, IndexInput input, int dimension) {
+      this.numCentroids = numCentroids;
+      this.input = input;
+      this.dimension = dimension;
+      this.scratch = new float[dimension];
+    }
+
+    @Override
+    public float[] vectorValue(int ord) throws IOException {
+      if (ord < 0 || ord >= numCentroids) {
+        throw new IllegalArgumentException("ord must be in [0, " + numCentroids + "]");
+      }
+      if (ord == this.ord) {
+        return scratch;
+      }
+      input.seek((long) ord * Float.BYTES * dimension);
+      input.readFloats(scratch, 0, dimension);
+      this.ord = ord;
+      return scratch;
+    }
+
+    @Override
+    public int dimension() {
+      return dimension;
+    }
+
+    @Override
+    public int size() {
+      return numCentroids;
+    }
+
+    @Override
+    public FloatVectorValues copy() throws IOException {
+      return new OffHeapCentroidFloatVectorValues(numCentroids, input.clone(), dimension);
+    }
+  }
+}

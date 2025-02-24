@@ -155,6 +155,27 @@ public class TestVectorUtilSupport extends BaseVectorizationTestCase {
     assertLongReturningProviders(p -> p.int4BitDotProduct(int4Quantized, binaryQuantized));
   }
 
+  public void testCenterAndCalculateOSQStats() {
+    var vector = new float[size];
+    var centroid = new float[size];
+    for (int i = 0; i < size; ++i) {
+      vector[i] = random().nextFloat();
+      centroid[i] = random().nextFloat();
+    }
+    var centeredLucene = new float[size];
+    var statsLucene = new float[6];
+    LUCENE_PROVIDER
+        .getVectorUtilSupport()
+        .centerAndCalculateOSQStatsDp(vector, centroid, centeredLucene, statsLucene);
+    var centeredPanama = new float[size];
+    var statsPanama = new float[6];
+    PANAMA_PROVIDER
+        .getVectorUtilSupport()
+        .centerAndCalculateOSQStatsDp(vector, centroid, centeredPanama, statsPanama);
+    assertArrayEquals(centeredLucene, centeredPanama, 1e-3f);
+    assertArrayEquals(statsLucene, statsPanama, 1e-3f);
+  }
+
   static byte[] pack(byte[] unpacked) {
     int len = (unpacked.length + 1) / 2;
     var packed = new byte[len];
