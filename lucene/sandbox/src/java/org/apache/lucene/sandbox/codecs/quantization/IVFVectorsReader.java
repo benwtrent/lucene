@@ -182,6 +182,12 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     for (int i = 0; i < numPostingLists; i++) {
       postingListOffsets[i] = new long[] {input.readLong(), input.readLong()};
     }
+    final float[] globalCentroid = new float[info.getVectorDimension()];
+    float globalCentroidDp = 0;
+    if (numPostingLists > 0) {
+      input.readFloats(globalCentroid, 0, globalCentroid.length);
+      globalCentroidDp = Float.intBitsToFloat(input.readInt());
+    }
     if (similarityFunction != info.getVectorSimilarityFunction()) {
       throw new IllegalStateException(
           "Inconsistent vector similarity function for field=\""
@@ -192,7 +198,13 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
               + info.getVectorSimilarityFunction());
     }
     return new FieldEntry(
-        similarityFunction, vectorEncoding, centroidOffset, centroidLength, postingListOffsets);
+        similarityFunction,
+        vectorEncoding,
+        centroidOffset,
+        centroidLength,
+        postingListOffsets,
+        globalCentroid,
+        globalCentroidDp);
   }
 
   private static VectorSimilarityFunction readSimilarityFunction(DataInput input)
@@ -227,6 +239,17 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   @Override
   public final ByteVectorValues getByteVectorValues(String field) throws IOException {
     return rawVectorsReader.getByteVectorValues(field);
+  }
+
+  protected float[] getGlobalCentroid(FieldInfo info) {
+    if (info == null || info.getVectorEncoding().equals(VectorEncoding.BYTE)) {
+      return null;
+    }
+    FieldEntry entry = fields.get(info.number);
+    if (entry == null) {
+      return null;
+    }
+    return entry.globalCentroid();
   }
 
   @Override
@@ -296,7 +319,9 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       VectorEncoding vectorEncoding,
       long centroidOffset,
       long centroidLength,
-      long[][] postingListOffsetsAndLengths) {
+      long[][] postingListOffsetsAndLengths,
+      float[] globalCentroid,
+      float globalCentroidDp) {
     IndexInput centroidSlice(IndexInput centroidFile) throws IOException {
       return centroidFile.slice("centroids", centroidOffset, centroidLength);
     }

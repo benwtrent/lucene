@@ -50,11 +50,24 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
 
   @Override
   protected IVFUtils.CentroidQueryScorer getCentroidScorer(
-      FieldInfo fieldInfo, int numCentroids, IndexInput centroids, float[] target)
+      FieldInfo fieldInfo, int numCentroids, IndexInput centroids, float[] targetQuery)
       throws IOException {
+    float[] globalCentroid = fields.get(fieldInfo.number).globalCentroid();
+    float globalCentroidDp = fields.get(fieldInfo.number).globalCentroidDp();
+    OptimizedScalarQuantizer scalarQuantizer =
+        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    byte[] quantized = new byte[targetQuery.length];
+    float[] targetScratch = ArrayUtil.copyArray(targetQuery);
+    OptimizedScalarQuantizer.QuantizationResult queryParams =
+        scalarQuantizer.scalarQuantize(targetScratch, quantized, (byte) 4, globalCentroid);
     return new IVFUtils.CentroidQueryScorer() {
       int currentCentroid = -1;
+      private final byte[] quantizedCentroid = new byte[fieldInfo.getVectorDimension()];
       private final float[] centroid = new float[fieldInfo.getVectorDimension()];
+      private final float[] centroidCorrectiveValues = new float[3];
+      private int quantizedCentroidComponentSum;
+      private final long centroidByteSize =
+          IVFUtils.calculateByteLength(fieldInfo.getVectorDimension(), (byte) 4);
 
       @Override
       public int size() {
@@ -63,18 +76,36 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
 
       @Override
       public float[] centroid(int centroidOrdinal) throws IOException {
-        if (centroidOrdinal == currentCentroid) {
-          return centroid;
-        }
-        centroids.seek(centroidOrdinal * Float.BYTES * fieldInfo.getVectorDimension());
-        centroids.readFloats(centroid, 0, centroid.length);
+        readQuantizedCentroid(centroidOrdinal);
         return centroid;
+      }
+
+      private void readQuantizedCentroid(int centroidOrdinal) throws IOException {
+        if (centroidOrdinal == currentCentroid) {
+          return;
+        }
+        centroids.seek(centroidOrdinal * centroidByteSize);
+        quantizedCentroidComponentSum =
+            IVFUtils.readQuantizedValue(centroids, quantizedCentroid, centroidCorrectiveValues);
+        centroids.seek(
+            numCentroids * centroidByteSize
+                + (long) Float.BYTES * quantizedCentroid.length * centroidOrdinal);
+        centroids.readFloats(centroid, 0, centroid.length);
+        currentCentroid = centroidOrdinal;
       }
 
       @Override
       public float score(int centroidOrdinal) throws IOException {
-        float[] centroid = centroid(centroidOrdinal);
-        return fieldInfo.getVectorSimilarityFunction().compare(centroid, target);
+        readQuantizedCentroid(centroidOrdinal);
+        return int4QuantizedScore(
+            quantized,
+            queryParams,
+            fieldInfo.getVectorDimension(),
+            quantizedCentroid,
+            centroidCorrectiveValues,
+            quantizedCentroidComponentSum,
+            globalCentroidDp,
+            fieldInfo.getVectorSimilarityFunction());
       }
     };
   }
@@ -82,6 +113,10 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   @Override
   protected FloatVectorValues getCentroids(IndexInput indexInput, int numCentroids, FieldInfo info)
       throws IOException {
+    FieldEntry entry = fields.get(info.number);
+    if (entry == null) {
+      return null;
+    }
     return new OffHeapCentroidFloatVectorValues(
         numCentroids, indexInput, info.getVectorDimension());
   }
@@ -102,7 +137,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     }
     int centroidsToReturn = nProbe;
     if (centroidsToReturn <= 0) {
-      centroidsToReturn = Math.max(((knnCollector.k() * 100) / 10_000), 1);
+      centroidsToReturn = Math.max(((knnCollector.k() * 300) / 1_000), 1);
     }
     if (preferredCentroids != null) {
       centroidsToReturn = Math.min(centroidsToReturn, preferredCentroids.size());
@@ -242,9 +277,8 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
           quantized = true;
         }
         postingsSlice.seek(slicePos + pos * quantizedByteLength);
-        postingsSlice.readBytes(quantizedBits, 0, quantizedBits.length);
-        postingsSlice.readFloats(correctiveValues, 0, correctiveValues.length);
-        int quantizedComponentSum = Short.toUnsignedInt(postingsSlice.readShort());
+        int quantizedComponentSum =
+            IVFUtils.readQuantizedValue(postingsSlice, quantizedBits, correctiveValues);
         return quantizedScore(
             quantizedQueryScratch,
             queryCorrections,
@@ -282,6 +316,38 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       knnCollector.incVisitedCount(1);
       float score = scorer.score();
       knnCollector.collect(docId, score);
+    }
+  }
+
+  static float int4QuantizedScore(
+      byte[] quantizedQuery,
+      OptimizedScalarQuantizer.QuantizationResult queryCorrections,
+      int dims,
+      byte[] binaryCode,
+      float[] targetCorrections,
+      int targetComponentSum,
+      float centroidDp,
+      VectorSimilarityFunction similarityFunction) {
+    float qcDist = VectorUtil.int4DotProduct(quantizedQuery, binaryCode);
+    float x1 = targetComponentSum;
+    float ax = targetCorrections[0];
+    // Here we assume `lx` is simply bit vectors, so the scaling isn't necessary
+    float lx = (targetCorrections[1] - ax) * FOUR_BIT_SCALE;
+    float ay = queryCorrections.lowerInterval();
+    float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
+    float y1 = queryCorrections.quantizedComponentSum();
+    float score = ax * ay * dims + ay * lx * x1 + ax * ly * y1 + lx * ly * qcDist;
+    if (similarityFunction == EUCLIDEAN) {
+      score = queryCorrections.additionalCorrection() + targetCorrections[2] - 2 * score;
+      return Math.max(1 / (1f + score), 0);
+    } else {
+      // For cosine and max inner product, we need to apply the additional correction, which is
+      // assumed to be the non-centered dot-product between the vector and the centroid
+      score += queryCorrections.additionalCorrection() + targetCorrections[2] - centroidDp;
+      if (similarityFunction == MAXIMUM_INNER_PRODUCT) {
+        return VectorUtil.scaleMaxInnerProductScore(score);
+      }
+      return Math.max((1f + score) / 2f, 0);
     }
   }
 
@@ -323,14 +389,16 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     private final int numCentroids;
     private final IndexInput input;
     private final int dimension;
-    private final float[] scratch;
+    private final float[] centroid;
+    private final long centroidByteSize;
     private int ord = -1;
 
     OffHeapCentroidFloatVectorValues(int numCentroids, IndexInput input, int dimension) {
       this.numCentroids = numCentroids;
       this.input = input;
       this.dimension = dimension;
-      this.scratch = new float[dimension];
+      this.centroid = new float[dimension];
+      this.centroidByteSize = IVFUtils.calculateByteLength(dimension, (byte) 4);
     }
 
     @Override
@@ -339,12 +407,20 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         throw new IllegalArgumentException("ord must be in [0, " + numCentroids + "]");
       }
       if (ord == this.ord) {
-        return scratch;
+        return centroid;
       }
-      input.seek((long) ord * Float.BYTES * dimension);
-      input.readFloats(scratch, 0, dimension);
-      this.ord = ord;
-      return scratch;
+      readQuantizedCentroid(ord);
+      return centroid;
+    }
+
+    private void readQuantizedCentroid(int centroidOrdinal) throws IOException {
+      if (centroidOrdinal == ord) {
+        return;
+      }
+      input.seek(
+          numCentroids * centroidByteSize + (long) Float.BYTES * dimension * centroidOrdinal);
+      input.readFloats(centroid, 0, centroid.length);
+      ord = centroidOrdinal;
     }
 
     @Override

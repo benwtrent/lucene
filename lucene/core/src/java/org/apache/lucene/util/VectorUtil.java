@@ -17,6 +17,7 @@
 
 package org.apache.lucene.util;
 
+import java.util.List;
 import java.util.stream.IntStream;
 import org.apache.lucene.internal.vectorization.VectorUtilSupport;
 import org.apache.lucene.internal.vectorization.VectorizationProvider;
@@ -360,5 +361,11 @@ public final class VectorUtil {
     assert target.length == centroid.length;
     assert stats.length == 6;
     IMPL.centerAndCalculateOSQStatsDp(target, centroid, centered, stats);
+  }
+
+  public static void calculateCentroid(List<float[]> vectors, float[] centroid) {
+    assert !vectors.isEmpty();
+    assert centroid.length == vectors.get(0).length;
+    IMPL.calculateCentroid(vectors, centroid);
   }
 }

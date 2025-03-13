@@ -230,6 +230,18 @@ public class OptimizedScalarQuantizer {
         sumQuery);
   }
 
+  public static void deScalarQuantize(
+      byte[] quantized,
+      float[] dequantized,
+      float lowerInterval,
+      float upperInterval,
+      float[] centroid) {
+    float step = (upperInterval - lowerInterval) / (quantized.length - 1);
+    for (int i = 0; i < quantized.length; i++) {
+      dequantized[i] = (lowerInterval + quantized[i] * step) + centroid[i];
+    }
+  }
+
   /**
    * Compute the loss of the vector given the interval. Effectively, we are computing the MSE of a
    * dequantized vector with the raw vector.

@@ -10,6 +10,9 @@ import java.io.IOException;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 
 public class IVFUtils {
 
@@ -26,8 +29,9 @@ public class IVFUtils {
 
     float[] centroid(int centroidOrdinal) throws IOException;
 
-    // TODO maybe we can make this just two ordinals...
-    float score(int centroidOrdinal, float[] vector) throws IOException;
+    void setScoringVector(float[] vector);
+
+    float score(int centroidOrdinal) throws IOException;
   }
 
   public interface PostingsScorer {
@@ -35,12 +39,6 @@ public class IVFUtils {
     DocIdSetIterator resetPostingsScorer(int centroidOrdinal, float[] centroid) throws IOException;
 
     float score() throws IOException;
-  }
-
-  public interface CloseableCentroidAssignmentScorer
-      extends CentroidAssignmentScorer, AutoCloseable {
-    @Override
-    void close();
   }
 
   public interface VectorCentroidScorer {
@@ -55,5 +53,40 @@ public class IVFUtils {
       return reader;
     }
     return null;
+  }
+
+  static int calculateByteLength(int dimension, byte bits) {
+    int vectorBytes =
+        switch (bits) {
+          case 1 -> (OptimizedScalarQuantizer.discretize(dimension, 64) / 8);
+          case 4 -> dimension;
+          case 32 -> dimension * Float.BYTES;
+          default -> throw new IllegalStateException("Unexpected value: " + bits);
+        };
+    return vectorBytes + 3 * Float.BYTES + Short.BYTES;
+  }
+
+  static void writeQuantizedValue(
+      IndexOutput indexOutput,
+      byte[] binaryValue,
+      OptimizedScalarQuantizer.QuantizationResult corrections)
+      throws IOException {
+    indexOutput.writeBytes(binaryValue, binaryValue.length);
+    indexOutput.writeInt(Float.floatToIntBits(corrections.lowerInterval()));
+    indexOutput.writeInt(Float.floatToIntBits(corrections.upperInterval()));
+    indexOutput.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
+    assert corrections.quantizedComponentSum() >= 0
+        && corrections.quantizedComponentSum() <= 0xffff;
+    indexOutput.writeShort((short) corrections.quantizedComponentSum());
+  }
+
+  static int readQuantizedValue(IndexInput indexInput, byte[] binaryValue, float[] corrections)
+      throws IOException {
+    assert corrections.length == 3;
+    indexInput.readBytes(binaryValue, 0, binaryValue.length);
+    corrections[0] = Float.intBitsToFloat(indexInput.readInt());
+    corrections[1] = Float.intBitsToFloat(indexInput.readInt());
+    corrections[2] = Float.intBitsToFloat(indexInput.readInt());
+    return Short.toUnsignedInt(indexInput.readShort());
   }
 }

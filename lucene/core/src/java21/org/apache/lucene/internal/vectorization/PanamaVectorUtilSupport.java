@@ -33,6 +33,7 @@ import static jdk.incubator.vector.VectorOperators.S2I;
 import static jdk.incubator.vector.VectorOperators.ZERO_EXTEND_B2S;
 
 import java.lang.foreign.MemorySegment;
+import java.util.List;
 import jdk.incubator.vector.ByteVector;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.IntVector;
@@ -1140,5 +1141,10 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
       xe = fma(target[i], xiiq, xe);
     }
     return (1f - lambda) * xe * xe / norm2 + lambda * e;
+  }
+
+  public void calculateCentroid(List<float[]> vectors, float[] centroid) {
+    assert vectors.size() > 0;
+    DefaultVectorUtilSupport.calculateCentroidImpl(vectors, centroid);
   }
 }

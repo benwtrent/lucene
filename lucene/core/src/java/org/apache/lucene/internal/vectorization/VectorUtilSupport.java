@@ -17,6 +17,8 @@
 
 package org.apache.lucene.internal.vectorization;
 
+import java.util.List;
+
 /**
  * Interface for implementations of VectorUtil support.
  *
@@ -77,4 +79,6 @@ public interface VectorUtilSupport {
 
   void centerAndCalculateOSQStatsDp(
       float[] target, float[] centroid, float[] centered, float[] stats);
+
+  void calculateCentroid(List<float[]> vectors, float[] centroid);
 }

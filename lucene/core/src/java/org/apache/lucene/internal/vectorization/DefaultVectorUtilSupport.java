@@ -17,6 +17,7 @@
 
 package org.apache.lucene.internal.vectorization;
 
+import java.util.List;
 import org.apache.lucene.util.BitUtil;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.SuppressForbidden;
@@ -309,6 +310,23 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
     stats[3] = min;
     stats[4] = max;
     stats[5] = centroidDot;
+  }
+
+  @Override
+  public void calculateCentroid(List<float[]> vectors, float[] centroid) {
+    calculateCentroidImpl(vectors, centroid);
+  }
+
+  public static void calculateCentroidImpl(List<float[]> vectors, float[] centroid) {
+    for (var vector : vectors) {
+      assert vector.length == centroid.length;
+      for (int i = 0; i < centroid.length; i++) {
+        centroid[i] += vector[i];
+      }
+    }
+    for (int i = 0; i < centroid.length; i++) {
+      centroid[i] /= vectors.size();
+    }
   }
 
   public static long int4BitDotProductImpl(byte[] q, byte[] d) {

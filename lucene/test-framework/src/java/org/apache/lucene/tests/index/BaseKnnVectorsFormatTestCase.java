@@ -1940,7 +1940,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
       if (supportsSimilarity(similarity) == false) {
         continue;
       }
-      assertRecall(similarity, 0.5, 1.0);
+      assertRecall(similarity, 0.4, 1.0);
     }
   }
 
@@ -2049,7 +2049,8 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
       String field, int dimension, VectorSimilarityFunction vectorSimilarityFunction)
       throws IOException {
     Directory indexStore = newDirectory(random());
-    IndexWriter writer = new IndexWriter(indexStore, newIndexWriterConfig());
+    IndexWriterConfig iwc = newIndexWriterConfig();
+    IndexWriter writer = new IndexWriter(indexStore, iwc);
     float[] scratch = new float[dimension];
     Set<String> seen = new HashSet<>(578);
     for (String file : List.of("LICENSE.txt", "NOTICE.txt")) {

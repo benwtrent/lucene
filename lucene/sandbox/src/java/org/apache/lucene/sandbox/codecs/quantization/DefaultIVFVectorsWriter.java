@@ -65,7 +65,10 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
   @Override
   protected IVFUtils.CentroidAssignmentScorer calculateAndWriteCentroids(
-      FieldInfo fieldInfo, FloatVectorValues floatVectorValues, IndexOutput centroidOutput)
+      FieldInfo fieldInfo,
+      FloatVectorValues floatVectorValues,
+      IndexOutput centroidOutput,
+      float[] globalCentroid)
       throws IOException {
     if (floatVectorValues.size() == 0) {
       return new IVFUtils.CentroidAssignmentScorer() {
@@ -80,7 +83,12 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         }
 
         @Override
-        public float score(int centroidOrdinal, float[] vector) {
+        public float score(int centroidOrdinal) {
+          throw new IllegalStateException("No centroids");
+        }
+
+        @Override
+        public void setScoringVector(float[] vector) {
           throw new IllegalStateException("No centroids");
         }
       };
@@ -108,12 +116,22 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
             DEFAULT_ITRS,
             desiredClusters * 256);
     float[][] centroids = kMeans.centroids();
+    // write them
+    OptimizedScalarQuantizer osq =
+        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
+    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
+    for (int i = 0; i < centroids.length; i++) {
+      System.arraycopy(centroids[i], 0, centroidScratch, 0, centroids[i].length);
+      OptimizedScalarQuantizer.QuantizationResult quantizedCentroidResults =
+          osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+      IVFUtils.writeQuantizedValue(centroidOutput, quantizedScratch, quantizedCentroidResults);
+    }
     final ByteBuffer buffer =
         ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
             .order(ByteOrder.LITTLE_ENDIAN);
-    // write them
-    for (float[] centroid : centroids) {
-      buffer.asFloatBuffer().put(centroid);
+    for (int i = 0; i < centroids.length; i++) {
+      buffer.asFloatBuffer().put(centroids[i]);
       centroidOutput.writeBytes(buffer.array(), buffer.array().length);
     }
     return new OnHeapCentroidAssignmentScorer(centroids);
@@ -176,15 +194,9 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         int ord = cluster.get(cidx);
         // write vector
         byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
-        postingsOutput.writeBytes(binaryValue, binaryValue.length);
         OptimizedScalarQuantizer.QuantizationResult corrections =
             binarizedByteVectorValues.getCorrectiveTerms(ord);
-        postingsOutput.writeInt(Float.floatToIntBits(corrections.lowerInterval()));
-        postingsOutput.writeInt(Float.floatToIntBits(corrections.upperInterval()));
-        postingsOutput.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
-        assert corrections.quantizedComponentSum() >= 0
-            && corrections.quantizedComponentSum() <= 0xffff;
-        postingsOutput.writeShort((short) corrections.quantizedComponentSum());
+        IVFUtils.writeQuantizedValue(postingsOutput, binaryValue, corrections);
       }
       offsetsAndLengths[i][1] = postingsOutput.getFilePointer() - offsetsAndLengths[i][0];
     }
@@ -193,7 +205,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
   @Override
   protected IVFUtils.CentroidAssignmentScorer createCentroidScorer(
-      IndexInput centroidsInput, int numCentroids, FieldInfo fieldInfo) throws IOException {
+      IndexInput centroidsInput, int numCentroids, FieldInfo fieldInfo, float[] globalCentroid)
+      throws IOException {
     return new OffHeapCentroidAssignmentScorer(centroidsInput, numCentroids, fieldInfo);
   }
 
@@ -202,7 +215,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       FieldInfo fieldInfo,
       FloatVectorValues floatVectorValues,
       IndexOutput temporaryCentroidOutput,
-      MergeState mergeState)
+      MergeState mergeState,
+      float[] globalCentroid)
       throws IOException {
     if (floatVectorValues.size() == 0) {
       return 0;
@@ -279,12 +293,22 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
           IVF_VECTOR_COMPONENT, "KMeans time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
     }
     float[][] centroids = kMeans.centroids();
+    // write them
+    OptimizedScalarQuantizer osq =
+        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
+    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
+    for (int i = 0; i < centroids.length; i++) {
+      System.arraycopy(centroids[i], 0, centroidScratch, 0, centroids[i].length);
+      OptimizedScalarQuantizer.QuantizationResult result =
+          osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+      IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
+    }
     final ByteBuffer buffer =
         ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
             .order(ByteOrder.LITTLE_ENDIAN);
-    // write them
-    for (float[] centroid : centroids) {
-      buffer.asFloatBuffer().put(centroid);
+    for (int i = 0; i < centroids.length; i++) {
+      buffer.asFloatBuffer().put(centroids[i]);
       temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
     }
     return centroids.length;
@@ -347,16 +371,10 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       for (int cidx = 0; cidx < cluster.size(); cidx++) {
         int ord = cluster.get(cidx);
         // write vector
-        byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
-        postingsOutput.writeBytes(binaryValue, binaryValue.length);
-        OptimizedScalarQuantizer.QuantizationResult corrections =
-            binarizedByteVectorValues.getCorrectiveTerms(ord);
-        postingsOutput.writeInt(Float.floatToIntBits(corrections.lowerInterval()));
-        postingsOutput.writeInt(Float.floatToIntBits(corrections.upperInterval()));
-        postingsOutput.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
-        assert corrections.quantizedComponentSum() >= 0
-            && corrections.quantizedComponentSum() <= 0xffff;
-        postingsOutput.writeShort((short) corrections.quantizedComponentSum());
+        IVFUtils.writeQuantizedValue(
+            postingsOutput,
+            binarizedByteVectorValues.vectorValue(ord),
+            binarizedByteVectorValues.getCorrectiveTerms(ord));
       }
       offsets[i][1] = postingsOutput.getFilePointer() - offsets[i][0];
     }
@@ -385,7 +403,9 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     float variance = m2 / (clusters.length - 1);
     infoStream.message(
         IVF_VECTOR_COMPONENT,
-        "Centroid size min: "
+        "Centroid count: "
+            + clusters.length
+            + " min: "
             + min
             + " max: "
             + max
@@ -407,11 +427,12 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     short numCentroids = (short) scorer.size();
     for (int docID = 0; docID < vectors.size(); docID++) {
       float[] vector = vectors.vectorValue(docID);
+      scorer.setScoringVector(vector);
       short bestCentroid = 0;
       if (numCentroids > 1) {
         float minSquaredDist = Float.MAX_VALUE;
         for (short c = 0; c < numCentroids; c++) {
-          float squareDist = scorer.score(c, vector);
+          float squareDist = scorer.score(c);
           if (squareDist < minSquaredDist) {
             bestCentroid = c;
             minSquaredDist = squareDist;
@@ -619,6 +640,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     private final int numCentroids;
     private final int dimension;
     private final float[] scratch;
+    private float[] q;
+    private final long centroidByteSize;
     private int currOrd = -1;
 
     OffHeapCentroidAssignmentScorer(IndexInput centroidsInput, int numCentroids, FieldInfo info) {
@@ -626,6 +649,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       this.numCentroids = numCentroids;
       this.dimension = info.getVectorDimension();
       this.scratch = new float[dimension];
+      this.centroidByteSize = IVFUtils.calculateByteLength(dimension, (byte) 4);
     }
 
     @Override
@@ -638,19 +662,28 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       if (centroidOrdinal == currOrd) {
         return scratch;
       }
-      centroidsInput.seek((long) centroidOrdinal * dimension * Float.BYTES);
+      centroidsInput.seek(
+          numCentroids * centroidByteSize + (long) centroidOrdinal * dimension * Float.BYTES);
       centroidsInput.readFloats(scratch, 0, dimension);
+      this.currOrd = centroidOrdinal;
       return scratch;
     }
 
     @Override
-    public float score(int centroidOrdinal, float[] vector) throws IOException {
-      return VectorUtil.squareDistance(centroid(centroidOrdinal), vector);
+    public void setScoringVector(float[] vector) {
+      q = vector;
+    }
+
+    @Override
+    public float score(int centroidOrdinal) throws IOException {
+      return VectorUtil.squareDistance(centroid(centroidOrdinal), q);
     }
   }
 
+  // TODO throw away rawCentroids
   static class OnHeapCentroidAssignmentScorer implements IVFUtils.CentroidAssignmentScorer {
     private final float[][] centroids;
+    private float[] q;
 
     OnHeapCentroidAssignmentScorer(float[][] centroids) {
       this.centroids = centroids;
@@ -662,13 +695,18 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     }
 
     @Override
+    public void setScoringVector(float[] vector) {
+      q = vector;
+    }
+
+    @Override
     public float[] centroid(int centroidOrdinal) throws IOException {
       return centroids[centroidOrdinal];
     }
 
     @Override
-    public float score(int centroidOrdinal, float[] vector) throws IOException {
-      return VectorUtil.squareDistance(centroid(centroidOrdinal), vector);
+    public float score(int centroidOrdinal) throws IOException {
+      return VectorUtil.squareDistance(centroid(centroidOrdinal), q);
     }
   }
 }
