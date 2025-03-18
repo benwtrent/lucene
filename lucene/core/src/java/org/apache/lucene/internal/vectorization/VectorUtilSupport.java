@@ -68,6 +68,9 @@ public interface VectorUtilSupport {
    */
   long int4BitDotProduct(byte[] int4Quantized, byte[] binaryQuantized);
 
+  void int4BitDotProductBulk(
+      byte[] int4Quantized, byte[] binaryQuantized, int size, int count, long[] output);
+
   float calculateOSQLoss(
       float[] target, float[] interval, float step, float invStep, float norm2, float lambda);
 

@@ -493,18 +493,70 @@ public class TestVectorUtil extends LuceneTestCase {
     }
   }
 
+  public void testInt4BitDotProductBulk() {
+    testInt4BitDotProductBulkImpl(VectorUtil::int4BitDotProductBulk);
+    testInt4BitDotProductBulkImpl(defaultedProvider.getVectorUtilSupport()::int4BitDotProductBulk);
+    testInt4BitDotProductBulkImpl(
+        defOrPanamaProvider.getVectorUtilSupport()::int4BitDotProductBulk);
+  }
+
+  interface Int4BitDotProductBulk {
+    void apply(byte[] q, byte[] d, int size, int count, long[] output);
+  }
+
+  void testInt4BitDotProductBulkImpl(Int4BitDotProductBulk Int4BitDotProductBulkFunc) {
+    int iterations = atLeast(50);
+    for (int i = 0; i < iterations; i++) {
+      int size = random().nextInt(5000);
+      int count = random().nextInt(20) + 1;
+      var d = new byte[size * count];
+      var q = new byte[size * 4];
+      var scalarOutput = new long[count];
+      var output = new long[count];
+      random().nextBytes(d);
+      random().nextBytes(q);
+      Int4BitDotProductBulkFunc.apply(q, d, size, count, output);
+      for (int j = 0; j < count; j++) {
+        scalarOutput[j] = scalarInt4BitDotProduct(q, d, j * size, size);
+      }
+      assertArrayEquals(scalarOutput, output);
+
+      Arrays.fill(d, Byte.MAX_VALUE);
+      Arrays.fill(q, Byte.MAX_VALUE);
+      Arrays.fill(output, 0L);
+      Int4BitDotProductBulkFunc.apply(q, d, size, count, output);
+      for (int j = 0; j < count; j++) {
+        scalarOutput[j] = scalarInt4BitDotProduct(q, d, j * size, size);
+      }
+      assertArrayEquals(scalarOutput, output);
+
+      Arrays.fill(d, Byte.MIN_VALUE);
+      Arrays.fill(q, Byte.MIN_VALUE);
+      Arrays.fill(output, 0L);
+      Int4BitDotProductBulkFunc.apply(q, d, size, count, output);
+      for (int j = 0; j < count; j++) {
+        scalarOutput[j] = scalarInt4BitDotProduct(q, d, j * size, size);
+      }
+      assertArrayEquals(scalarOutput, output);
+    }
+  }
+
   static int scalarInt4BitDotProduct(byte[] q, byte[] d) {
+    return scalarInt4BitDotProduct(q, d, 0, d.length);
+  }
+
+  static int scalarInt4BitDotProduct(byte[] q, byte[] d, int offset, int length) {
     int res = 0;
     for (int i = 0; i < 4; i++) {
-      res += (popcount(q, i * d.length, d, d.length) << i);
+      res += (popcount(q, i * length, d, offset, length) << i);
     }
     return res;
   }
 
-  public static int popcount(byte[] a, int aOffset, byte[] b, int length) {
+  public static int popcount(byte[] a, int aOffset, byte[] b, int bOffset, int length) {
     int res = 0;
     for (int j = 0; j < length; j++) {
-      int value = (a[aOffset + j] & b[j]) & 0xFF;
+      int value = (a[aOffset + j] & b[bOffset + j]) & 0xFF;
       for (int k = 0; k < Byte.SIZE; k++) {
         if ((value & (1 << k)) != 0) {
           ++res;

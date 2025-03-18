@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.lucene.util;
 
 import java.util.List;
@@ -227,6 +226,23 @@ public final class VectorUtil {
           "vector dimensions incompatible: " + q.length + "!= " + 4 + " x " + d.length);
     }
     return IMPL.int4BitDotProduct(q, d);
+  }
+
+  /**
+   * Dot product computed over int4 (values between [0,15]) bytes and a binary vector.
+   *
+   * @param q the int4 query vector
+   * @param d the binary documents vector
+   * @param size the size of one binary document (in bytes)
+   * @param count number of documents
+   * @param output the result in order of the documents
+   */
+  public static void int4BitDotProductBulk(byte[] q, byte[] d, int size, int count, long[] output) {
+    if (4 * size != q.length) {
+      throw new IllegalArgumentException(
+          "vector dimensions incompatible: " + q.length + "!= " + 4 + " x " + size);
+    }
+    IMPL.int4BitDotProductBulk(q, d, size, count, output);
   }
 
   /**

@@ -216,6 +216,12 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
   }
 
   @Override
+  public void int4BitDotProductBulk(
+      byte[] int4Quantized, byte[] binaryQuantized, int size, int count, long[] output) {
+    int4BitDotProductBulkImpl(int4Quantized, binaryQuantized, size, count, output);
+  }
+
+  @Override
   public float calculateOSQLoss(
       float[] target, float[] interval, float step, float invStep, float norm2, float lambda) {
     float a = interval[0];
@@ -348,5 +354,26 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
       ret += subRet << i;
     }
     return ret;
+  }
+
+  public static void int4BitDotProductBulkImpl(
+      byte[] q, byte[] d, int size, int count, long[] output) {
+    for (int i = 0; i < count; i++) {
+      output[i] = 0;
+      for (int j = 0; j < 4; j++) {
+        int r = 0;
+        long subRet = 0;
+        for (final int upperBound = size & -Integer.BYTES; r < upperBound; r += Integer.BYTES) {
+          subRet +=
+              Integer.bitCount(
+                  (int) BitUtil.VH_NATIVE_INT.get(q, j * size + r)
+                      & (int) BitUtil.VH_NATIVE_INT.get(d, i * size + r));
+        }
+        for (; r < size; r++) {
+          subRet += Integer.bitCount((q[j * size + r] & d[i * size + r]) & 0xFF);
+        }
+        output[i] += subRet << j;
+      }
+    }
   }
 }

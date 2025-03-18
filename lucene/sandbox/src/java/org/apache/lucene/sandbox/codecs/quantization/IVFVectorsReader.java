@@ -282,16 +282,15 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     while (topPostingLists.hasNext()) {
       final PostingListWithFileOffsetWithScore next = topPostingLists.next();
       // TODO can we remove the direct access to the centroid?
-      DocIdSetIterator idSetIterator =
-          scorer.resetPostingsScorer(
-              next.postingListWithFileOffset().centroidOrdinal(),
-              centroidQueryScorer.centroid(next.postingListWithFileOffset().centroidOrdinal()));
-      while (idSetIterator.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+      scorer.resetPostingsScorer(
+          next.postingListWithFileOffset().centroidOrdinal(),
+          centroidQueryScorer.centroid(next.postingListWithFileOffset().centroidOrdinal()));
+      while (scorer.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
         if (knnCollector.earlyTerminated()) {
           return;
         }
         knnCollector.incVisitedCount(1);
-        knnCollector.collect(idSetIterator.docID(), scorer.score());
+        knnCollector.collect(scorer.docID(), scorer.score());
       }
     }
   }

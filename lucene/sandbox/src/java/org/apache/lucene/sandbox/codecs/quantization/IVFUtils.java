@@ -34,11 +34,12 @@ public class IVFUtils {
     float score(int centroidOrdinal) throws IOException;
   }
 
-  public interface PostingsScorer {
+  public abstract static class PostingsScorer extends DocIdSetIterator {
     // TODO maybe we can not specifically pass the centroid...
-    DocIdSetIterator resetPostingsScorer(int centroidOrdinal, float[] centroid) throws IOException;
+    public abstract void resetPostingsScorer(int centroidOrdinal, float[] centroid)
+        throws IOException;
 
-    float score() throws IOException;
+    public abstract float score() throws IOException;
   }
 
   public interface VectorCentroidScorer {
