@@ -10,6 +10,7 @@ import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.SIMILA
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.function.IntPredicate;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.hnsw.FlatVectorsReader;
@@ -112,15 +113,6 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     return getCentroids(
         entry.centroidSlice(ivfCentroids), entry.postingListOffsetsAndLengths.length, fieldInfo);
   }
-
-  protected abstract void scorePostingList(
-      FieldInfo fieldInfo,
-      DocIdSetIterator docIdSetIterator,
-      IVFUtils.PostingsScorer postingsScorer,
-      KnnCollector knnCollector,
-      BitSet visitedDocs,
-      Bits acceptDocs)
-      throws IOException;
 
   private static IndexInput openDataInput(
       SegmentReadState state,
@@ -265,6 +257,18 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       nProbe = ivfStrategy.getNProbe();
     }
     BitSet visitedDocs = new FixedBitSet(state.segmentInfo.maxDoc() + 1);
+    // TODO can we make a conjunction between idSetIterator and the acceptDocs?
+    IntPredicate needsScoring =
+        docId -> {
+          if (visitedDocs.getAndSet(docId)) {
+            return false;
+          }
+          if (acceptDocs != null && acceptDocs.get(docId) == false) {
+            return false;
+          }
+          return true;
+        };
+
     FieldEntry entry = fields.get(fieldInfo.number);
     IVFUtils.CentroidQueryScorer centroidQueryScorer =
         getCentroidScorer(
@@ -274,7 +278,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
             target);
     final Iterator<PostingListWithFileOffsetWithScore> topPostingLists =
         scorePostingLists(fieldInfo, knnCollector, centroidQueryScorer, nProbe);
-    IVFUtils.PostingsScorer scorer = getPostingScorer(fieldInfo, ivfClusters, target);
+    IVFUtils.PostingsScorer scorer = getPostingScorer(fieldInfo, ivfClusters, target, needsScoring);
     while (topPostingLists.hasNext()) {
       final PostingListWithFileOffsetWithScore next = topPostingLists.next();
       // TODO can we remove the direct access to the centroid?
@@ -282,8 +286,13 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
           scorer.resetPostingsScorer(
               next.postingListWithFileOffset().centroidOrdinal(),
               centroidQueryScorer.centroid(next.postingListWithFileOffset().centroidOrdinal()));
-      // TODO can we make a conjunction between idSetIterator and the acceptDocs?
-      scorePostingList(fieldInfo, idSetIterator, scorer, knnCollector, visitedDocs, acceptDocs);
+      while (idSetIterator.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+        if (knnCollector.earlyTerminated()) {
+          return;
+        }
+        knnCollector.incVisitedCount(1);
+        knnCollector.collect(idSetIterator.docID(), scorer.score());
+      }
     }
   }
 
@@ -333,7 +342,8 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   }
 
   protected abstract IVFUtils.PostingsScorer getPostingScorer(
-      FieldInfo fieldInfo, IndexInput postingsLists, float[] target) throws IOException;
+      FieldInfo fieldInfo, IndexInput postingsLists, float[] target, IntPredicate needsScoring)
+      throws IOException;
 
   /**
    * A record containing the centroid and the index offset for a posting list with the given score

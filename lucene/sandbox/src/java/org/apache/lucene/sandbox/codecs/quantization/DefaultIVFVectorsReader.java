@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.IntPredicate;
 import org.apache.lucene.codecs.hnsw.FlatVectorsReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FloatVectorValues;
@@ -27,8 +28,6 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.ArrayUtil;
-import org.apache.lucene.util.BitSet;
-import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.GroupVIntUtil;
 import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.VectorUtil;
@@ -195,7 +194,8 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
 
   @Override
   protected IVFUtils.PostingsScorer getPostingScorer(
-      FieldInfo fieldInfo, IndexInput indexInput, float[] target) throws IOException {
+      FieldInfo fieldInfo, IndexInput indexInput, float[] target, IntPredicate needsScoring)
+      throws IOException {
     int discretizedDimensions = discretize(fieldInfo.getVectorDimension(), 64);
     float[] scratch = new float[target.length];
     byte[] quantizationScratch = new byte[target.length];
@@ -245,11 +245,17 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
 
           @Override
           public int nextDoc() throws IOException {
-            pos++;
-            if (pos < vectors) {
-              return docID();
+            while (true) {
+              pos++;
+              if (pos < vectors) {
+                int docId = docID();
+                if (needsScoring.test(docId)) {
+                  return docId;
+                }
+              } else {
+                return NO_MORE_DOCS;
+              }
             }
-            return NO_MORE_DOCS;
           }
 
           @Override
@@ -290,33 +296,6 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
             fieldInfo.getVectorSimilarityFunction());
       }
     };
-  }
-
-  @Override
-  protected void scorePostingList(
-      FieldInfo fieldInfo,
-      DocIdSetIterator docIdSetIterator,
-      IVFUtils.PostingsScorer scorer,
-      KnnCollector knnCollector,
-      BitSet visitedDocs,
-      Bits acceptDocs)
-      throws IOException {
-    // iterate docs
-    while (docIdSetIterator.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
-      int docId = docIdSetIterator.docID();
-      if (visitedDocs.getAndSet(docId)) {
-        continue;
-      }
-      if (acceptDocs != null && acceptDocs.get(docId) == false) {
-        continue;
-      }
-      if (knnCollector.earlyTerminated()) {
-        return;
-      }
-      knnCollector.incVisitedCount(1);
-      float score = scorer.score();
-      knnCollector.collect(docId, score);
-    }
   }
 
   static float int4QuantizedScore(
