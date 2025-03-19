@@ -97,4 +97,16 @@ final class PanamaVectorizationProvider extends VectorizationProvider {
     }
     return new PostingDecodingUtil(input);
   }
+
+  @Override
+  public OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int length) throws IOException {
+    if (PanamaVectorConstants.HAS_FAST_INTEGER_VECTORS
+        && input instanceof MemorySegmentAccessInput msai) {
+      MemorySegment ms = msai.segmentSliceOrNull(0, input.length());
+      if (ms != null) {
+        return new MemorySegmentOSQVectorsScorer(input, length, ms);
+      }
+    }
+    return new OSQVectorsScorer(input, length);
+  }
 }

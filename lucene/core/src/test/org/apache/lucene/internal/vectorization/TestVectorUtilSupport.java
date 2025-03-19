@@ -142,23 +142,6 @@ public class TestVectorUtilSupport extends BaseVectorizationTestCase {
     assertLongReturningProviders(p -> p.int4BitDotProduct(int4Quantized, binaryQuantized));
   }
 
-  public void testInt4BitDotProductBulk() {
-    final int count = random().nextInt(15) + 1;
-    var binaryQuantized = new byte[size * count];
-    var int4Quantized = new byte[size * 4];
-    random().nextBytes(binaryQuantized);
-    random().nextBytes(int4Quantized);
-    long[] outLucene = new long[count];
-    long[] outPanama = new long[count];
-    LUCENE_PROVIDER
-        .getVectorUtilSupport()
-        .int4BitDotProductBulk(int4Quantized, binaryQuantized, size, count, outLucene);
-    PANAMA_PROVIDER
-        .getVectorUtilSupport()
-        .int4BitDotProductBulk(int4Quantized, binaryQuantized, size, count, outPanama);
-    assertArrayEquals(outLucene, outPanama);
-  }
-
   public void testInt4BitDotProductBoundaries() {
     var binaryQuantized = new byte[size];
     var int4Quantized = new byte[size * 4];

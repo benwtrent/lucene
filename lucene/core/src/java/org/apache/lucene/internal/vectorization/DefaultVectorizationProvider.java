@@ -44,4 +44,9 @@ final class DefaultVectorizationProvider extends VectorizationProvider {
   public PostingDecodingUtil newPostingDecodingUtil(IndexInput input) {
     return new PostingDecodingUtil(input);
   }
+
+  @Override
+  public OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int length) {
+    return new OSQVectorsScorer(input, length);
+  }
 }

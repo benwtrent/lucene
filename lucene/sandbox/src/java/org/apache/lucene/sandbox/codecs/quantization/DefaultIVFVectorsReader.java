@@ -23,6 +23,8 @@ import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.VectorSimilarityFunction;
+import org.apache.lucene.internal.vectorization.OSQVectorsScorer;
+import org.apache.lucene.internal.vectorization.VectorizationProvider;
 import org.apache.lucene.sandbox.search.knn.IVFKnnSearchStrategy;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
@@ -40,6 +42,8 @@ import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
  */
 public class DefaultIVFVectorsReader extends IVFVectorsReader {
   private static final float FOUR_BIT_SCALE = 1f / ((1 << 4) - 1);
+
+  static final VectorizationProvider VECTORIZATION_PROVIDER = VectorizationProvider.getInstance();
 
   public DefaultIVFVectorsReader(SegmentReadState state, FlatVectorsReader rawVectorsReader)
       throws IOException {
@@ -109,8 +113,8 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   @Override
-  protected FloatVectorValues getCentroids(IndexInput indexInput, int numCentroids, FieldInfo info)
-      throws IOException {
+  protected FloatVectorValues getCentroids(
+      IndexInput indexInput, int numCentroids, FieldInfo info) {
     FieldEntry entry = fields.get(info.number);
     if (entry == null) {
       return null;
@@ -195,8 +199,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   protected IVFUtils.PostingsScorer getPostingScorer(
       FieldInfo fieldInfo, IndexInput indexInput, float[] target, IntPredicate needsScoring) {
     FieldEntry entry = fields.get(fieldInfo.number);
-    // return new PostingsScorer(target, indexInput, entry, fieldInfo, needsScoring);
-    return new BulkPostingsScorer(target, indexInput, entry, fieldInfo, needsScoring);
+    return new MemorySegmentPostingsScorer(target, indexInput, entry, fieldInfo, needsScoring);
   }
 
   static float int4QuantizedScore(
@@ -232,15 +235,13 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   static float quantizedScore(
-      byte[] quantizedQuery,
+      float qcDist,
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       int dims,
-      byte[] binaryCode,
       float[] targetCorrections,
       int targetComponentSum,
       float centroidDp,
       VectorSimilarityFunction similarityFunction) {
-    float qcDist = VectorUtil.int4BitDotProduct(quantizedQuery, binaryCode);
     float x1 = targetComponentSum;
     float ax = targetCorrections[0];
     // Here we assume `lx` is simply bit vectors, so the scaling isn't necessary
@@ -319,7 +320,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     }
   }
 
-  private static class PostingsScorer extends IVFUtils.PostingsScorer {
+  private static class MemorySegmentPostingsScorer extends IVFUtils.PostingsScorer {
     final long quantizedByteLength;
     final IndexInput indexInput;
     final float[] target;
@@ -341,10 +342,10 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     final byte[] quantizationScratch;
     final byte[] quantizedQueryScratch;
     final OptimizedScalarQuantizer quantizer;
-    final byte[] quantizedBits;
     final float[] correctiveValues = new float[3];
+    private OSQVectorsScorer osqVectorsScorer;
 
-    PostingsScorer(
+    MemorySegmentPostingsScorer(
         float[] target,
         IndexInput indexInput,
         FieldEntry entry,
@@ -360,8 +361,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       quantizationScratch = new byte[target.length];
       final int discretizedDimensions = discretize(fieldInfo.getVectorDimension(), 64);
       quantizedQueryScratch = new byte[QUERY_BITS * discretizedDimensions / 8];
-      quantizedBits = new byte[discretizedDimensions / 8];
-      quantizedByteLength = quantizedBits.length + (Float.BYTES * 3) + Short.BYTES;
+      quantizedByteLength = discretizedDimensions / 8 + (Float.BYTES * 3) + Short.BYTES;
       quantizer = new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     }
 
@@ -380,6 +380,9 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       GroupVIntUtil.readGroupVInts(postingsSlice, docIdsScratch, vectors);
       prefixSum(docIdsScratch, vectors);
       slicePos = postingsSlice.getFilePointer();
+      osqVectorsScorer =
+          VECTORIZATION_PROVIDER.newOSQVectorsScorer(
+              postingsSlice, quantizedQueryScratch.length / 4);
       pos = -1;
     }
 
@@ -426,207 +429,17 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         quantized = true;
       }
       postingsSlice.seek(slicePos + pos * quantizedByteLength);
-      postingsSlice.readBytes(quantizedBits, 0, quantizedBits.length);
+      final float qcDist = osqVectorsScorer.int4BitDotProduct(quantizedQueryScratch);
       postingsSlice.readFloats(correctiveValues, 0, correctiveValues.length);
-      int quantizedComponentSum = Short.toUnsignedInt(postingsSlice.readShort());
+      final int quantizedComponentSum = Short.toUnsignedInt(postingsSlice.readShort());
       return quantizedScore(
-          quantizedQueryScratch,
+          qcDist,
           queryCorrections,
           fieldInfo.getVectorDimension(),
-          quantizedBits,
           correctiveValues,
           quantizedComponentSum,
           centroidDp,
           fieldInfo.getVectorSimilarityFunction());
-    }
-  }
-
-  private static class BulkPostingsScorer extends IVFUtils.PostingsScorer {
-
-    private static final int BUFFER_SIZE = 16;
-
-    final long quantizedByteLength;
-    final IndexInput indexInput;
-    final float[] target;
-    final FieldEntry entry;
-    final FieldInfo fieldInfo;
-    final IntPredicate needsScoring;
-
-    int[] docIdsScratch = new int[0];
-    IndexInput postingsSlice;
-    int vectors;
-    boolean quantized = false;
-    float centroidDp;
-    float[] centroid;
-    int pos;
-    long slicePos;
-    OptimizedScalarQuantizer.QuantizationResult queryCorrections;
-
-    final float[] scratch;
-    final byte[] quantizationScratch;
-    final byte[] quantizedQueryScratch;
-    final OptimizedScalarQuantizer quantizer;
-    final byte[] quantizedBits;
-    final float[] correctiveValues = new float[3];
-
-    int bufferScoreDocs = 0;
-    int bufferPos = 0;
-    final float[] scoreDocs = new float[BUFFER_SIZE];
-    final float[] scoreDocsScratch = new float[BUFFER_SIZE];
-    final long[] qcDist = new long[BUFFER_SIZE];
-    final int[] bufferDocs = new int[BUFFER_SIZE];
-    final byte[] bulkQuantizedBits;
-    final int len;
-
-    BulkPostingsScorer(
-        float[] target,
-        IndexInput indexInput,
-        FieldEntry entry,
-        FieldInfo fieldInfo,
-        IntPredicate needsScoring) {
-      this.target = target;
-      this.indexInput = indexInput;
-      this.entry = entry;
-      this.fieldInfo = fieldInfo;
-      this.needsScoring = needsScoring;
-
-      scratch = new float[target.length];
-      quantizationScratch = new byte[target.length];
-      final int discretizedDimensions = discretize(fieldInfo.getVectorDimension(), 64);
-      quantizer = new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
-      this.len = discretizedDimensions / 8;
-      quantizedByteLength = len + (Float.BYTES * 3) + Short.BYTES;
-      quantizedQueryScratch = new byte[QUERY_BITS * len];
-      quantizedBits = new byte[BUFFER_SIZE * len];
-      bulkQuantizedBits = new byte[BUFFER_SIZE * len];
-    }
-
-    @Override
-    public void resetPostingsScorer(int centroidOrdinal, float[] centroid) throws IOException {
-      quantized = false;
-      postingsSlice = entry.postingsSlice(indexInput, centroidOrdinal);
-      vectors = postingsSlice.readVInt();
-      centroidDp = Float.intBitsToFloat(postingsSlice.readInt());
-      this.centroid = centroid;
-      // read the doc ids
-      docIdsScratch =
-          vectors > docIdsScratch.length
-              ? ArrayUtil.growExact(docIdsScratch, vectors)
-              : docIdsScratch;
-      GroupVIntUtil.readGroupVInts(postingsSlice, docIdsScratch, vectors);
-      prefixSum(docIdsScratch, vectors);
-      slicePos = postingsSlice.getFilePointer();
-      pos = bufferPos = bufferScoreDocs = 0;
-    }
-
-    @Override
-    public int docID() {
-      return bufferDocs[bufferPos];
-    }
-
-    @Override
-    public int nextDoc() throws IOException {
-      bufferPos++;
-      if (bufferPos < bufferScoreDocs) {
-        return docID();
-      } else if (pos < vectors) {
-        refillScoreDocs();
-        bufferPos = 0;
-        return docID();
-      }
-      return NO_MORE_DOCS;
-    }
-
-    private void refillScoreDocs() throws IOException {
-      if (quantized == false) {
-        System.arraycopy(target, 0, scratch, 0, target.length);
-        if (fieldInfo.getVectorSimilarityFunction() == COSINE) {
-          VectorUtil.l2normalize(scratch);
-        }
-        queryCorrections =
-            quantizer.scalarQuantize(scratch, quantizationScratch, (byte) 4, centroid);
-        transposeHalfByte(quantizationScratch, quantizedQueryScratch);
-        quantized = true;
-      }
-      float ay = queryCorrections.lowerInterval();
-      float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
-      float y1 = queryCorrections.quantizedComponentSum();
-      bufferScoreDocs = 0;
-      float[] scoreSingle = new float[BUFFER_SIZE];
-      byte[] bytes = new byte[len];
-      for (; pos < vectors && bufferScoreDocs < BUFFER_SIZE; pos++) {
-        int docID = docIdsScratch[pos];
-        if (needsScoring.test(docID)) {
-          postingsSlice.seek(slicePos + pos * quantizedByteLength);
-          postingsSlice.readBytes(quantizedBits, bufferScoreDocs * len, len);
-          postingsSlice.readFloats(correctiveValues, 0, correctiveValues.length);
-          float x1 = Short.toUnsignedInt(postingsSlice.readShort());
-          System.arraycopy(quantizedBits, bufferScoreDocs * len, bytes, 0, len);
-          scoreSingle[bufferScoreDocs] =
-              quantizedScore(
-                  quantizedQueryScratch,
-                  queryCorrections,
-                  fieldInfo.getVectorDimension(),
-                  bytes,
-                  correctiveValues,
-                  (int) x1,
-                  centroidDp,
-                  fieldInfo.getVectorSimilarityFunction());
-          float ax = correctiveValues[0];
-          // Here we assume `lx` is simply bit vectors, so the scaling isn't necessary
-          float lx = correctiveValues[1] - ax;
-          float B = ax * ay * fieldInfo.getVectorDimension() + ay * lx * x1 + ax * ly * y1;
-          float A = lx * ly;
-
-          if (fieldInfo.getVectorSimilarityFunction() == EUCLIDEAN) {
-            // For euclidean, we need to invert the score and apply the additional correction, which
-            // is
-            // assumed to be the squared l2norm of the centroid centered vectors.
-            B -= (queryCorrections.additionalCorrection() + correctiveValues[2]) * 0.5f;
-            A *= -2;
-            B *= -2;
-          } else {
-            // For cosine and max inner product, we need to apply the additional correction, which
-            // is
-            // assumed to be the non-centered dot-product between the vector and the centroid
-            B += queryCorrections.additionalCorrection() + correctiveValues[2] - centroidDp;
-          }
-
-          bufferDocs[bufferScoreDocs] = docID;
-          scoreDocs[bufferScoreDocs] = A;
-          scoreDocsScratch[bufferScoreDocs] = B;
-          bufferScoreDocs++;
-        }
-      }
-      VectorUtil.int4BitDotProductBulk(
-          quantizedQueryScratch, quantizedBits, len, bufferScoreDocs, qcDist);
-      for (int i = 0; i < bufferScoreDocs; i++) {
-        scoreDocs[i] = scoreDocs[i] * qcDist[i] + scoreDocsScratch[i];
-      }
-      for (int i = 0; i < bufferScoreDocs; i++) {
-        if (fieldInfo.getVectorSimilarityFunction() == EUCLIDEAN) {
-          scoreDocs[i] = Math.max(1f / (1f + scoreDocs[i]), 0f);
-        } else if (fieldInfo.getVectorSimilarityFunction() == MAXIMUM_INNER_PRODUCT) {
-          scoreDocs[i] = VectorUtil.scaleMaxInnerProductScore(scoreDocs[i]);
-        } else {
-          scoreDocs[i] = Math.max((1f + scoreDocs[i]) / 2f, 0f);
-        }
-      }
-    }
-
-    @Override
-    public int advance(int target) throws IOException {
-      return slowAdvance(target);
-    }
-
-    @Override
-    public long cost() {
-      return vectors;
-    }
-
-    @Override
-    public float score() {
-      return scoreDocs[bufferPos];
     }
   }
 }

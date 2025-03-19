@@ -229,23 +229,6 @@ public final class VectorUtil {
   }
 
   /**
-   * Dot product computed over int4 (values between [0,15]) bytes and a binary vector.
-   *
-   * @param q the int4 query vector
-   * @param d the binary documents vector
-   * @param size the size of one binary document (in bytes)
-   * @param count number of documents
-   * @param output the result in order of the documents
-   */
-  public static void int4BitDotProductBulk(byte[] q, byte[] d, int size, int count, long[] output) {
-    if (4 * size != q.length) {
-      throw new IllegalArgumentException(
-          "vector dimensions incompatible: " + q.length + "!= " + 4 + " x " + size);
-    }
-    IMPL.int4BitDotProductBulk(q, d, size, count, output);
-  }
-
-  /**
    * For xorBitCount we stride over the values as either 64-bits (long) or 32-bits (int) at a time.
    * On ARM Long::bitCount is not vectorized, and therefore produces less than optimal code, when
    * compared to Integer::bitCount. While Long::bitCount is optimal on x64. See

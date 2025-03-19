@@ -53,6 +53,9 @@ module org.apache.lucene.core {
   exports org.apache.lucene.util.packed;
   exports org.apache.lucene.util;
 
+  // to test IVF
+  exports org.apache.lucene.internal.vectorization;
+
   // Temporarily export HPPC to all modules (eventually, this
   // should be restricted to only Lucene modules)
   exports org.apache.lucene.internal.hppc;

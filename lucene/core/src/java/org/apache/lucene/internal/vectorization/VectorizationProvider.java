@@ -125,6 +125,10 @@ public abstract class VectorizationProvider {
   /** Create a new {@link PostingDecodingUtil} for the given {@link IndexInput}. */
   public abstract PostingDecodingUtil newPostingDecodingUtil(IndexInput input) throws IOException;
 
+  /** Create a new {@link OSQVectorsScorer} for the given {@link IndexInput}. */
+  public abstract OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int length)
+      throws IOException;
+
   // *** Lookup mechanism: ***
 
   private static final Logger LOG = Logger.getLogger(VectorizationProvider.class.getName());
@@ -213,6 +217,7 @@ public abstract class VectorizationProvider {
   // add all possible callers here as FQCN:
   private static final Set<String> VALID_CALLERS =
       Set.of(
+          "org.apache.lucene.sandbox.codecs.quantization.DefaultIVFVectorsReader",
           "org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil",
           "org.apache.lucene.util.VectorUtil",
           "org.apache.lucene.codecs.lucene101.Lucene101PostingsReader",
