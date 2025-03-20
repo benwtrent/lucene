@@ -99,7 +99,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         (int)
             Math.max(
                 maxNumClusters / 16.0,
-                Math.min(Math.sqrt(floatVectorValues.size()), maxNumClusters));
+                Math.max(Math.sqrt(floatVectorValues.size()), maxNumClusters));
     if (floatVectorValues.size() / desiredClusters > vectorPerCluster) {
       desiredClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
     }
