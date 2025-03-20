@@ -1164,7 +1164,8 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
         FloatVector vClamped = v.max(a).min(b);
         Vector<Integer> xiqint =
             vClamped.sub(a).mul(invStep).add(0.5f).convert(VectorOperators.F2I, 0);
-        FloatVector xiq = xiqint.reinterpretAsFloats().mul(step).add(a);
+        FloatVector xiq =
+            xiqint.convert(VectorOperators.I2F, 0).reinterpretAsFloats().mul(step).add(a);
         FloatVector xiiq = v.sub(xiq);
         xeVec = fma(v, xiiq, xeVec);
         eVec = fma(xiiq, xiiq, eVec);

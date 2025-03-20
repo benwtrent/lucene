@@ -356,10 +356,12 @@ public final class VectorUtil {
     assert target.length == centroid.length;
     assert stats.length == 5;
     if (target.length != centroid.length) {
-      throw new IllegalArgumentException("vector dimensions differ: " + target.length + "!=" + centroid.length);
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + target.length + "!=" + centroid.length);
     }
     if (centered.length != target.length) {
-      throw new IllegalArgumentException("vector dimensions differ: " + centered.length + "!=" + target.length);
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + centered.length + "!=" + target.length);
     }
     IMPL.centerAndCalculateOSQStatsEuclidean(target, centroid, centered, stats);
   }
@@ -367,10 +369,12 @@ public final class VectorUtil {
   public static void centerAndCalculateOSQStatsDp(
       float[] target, float[] centroid, float[] centered, float[] stats) {
     if (target.length != centroid.length) {
-      throw new IllegalArgumentException("vector dimensions differ: " + target.length + "!=" + centroid.length);
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + target.length + "!=" + centroid.length);
     }
     if (centered.length != target.length) {
-      throw new IllegalArgumentException("vector dimensions differ: " + centered.length + "!=" + target.length);
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + centered.length + "!=" + target.length);
     }
     assert stats.length == 6;
     IMPL.centerAndCalculateOSQStatsDp(target, centroid, centered, stats);
