@@ -81,4 +81,8 @@ public interface VectorUtilSupport {
       float[] target, float[] centroid, float[] centered, float[] stats);
 
   void calculateCentroid(List<float[]> vectors, float[] centroid);
+
+  float subtractAndDp(float[] v1, float[] v2, float[] result);
+
+  void soarResidual(float[] v1, float[] centroid, float[] originalResidual, float[] result);
 }

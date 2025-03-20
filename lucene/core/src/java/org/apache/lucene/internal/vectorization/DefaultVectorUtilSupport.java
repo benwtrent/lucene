@@ -318,6 +318,34 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
     calculateCentroidImpl(vectors, centroid);
   }
 
+  @Override
+  public float subtractAndDp(float[] v1, float[] v2, float[] result) {
+    assert v1.length == v2.length;
+    assert v1.length == result.length;
+    float dp = 0;
+    for (int i = 0; i < v1.length; i++) {
+      result[i] = v1[i] - v2[i];
+      dp = fma(result[i], result[i], dp);
+    }
+    return 0;
+  }
+
+  @Override
+  public void soarResidual(float[] v1, float[] centroid, float[] originalResidual, float[] result) {
+    assert v1.length == centroid.length;
+    assert v1.length == originalResidual.length;
+    assert result.length == 2;
+    float sd = 0;
+    float proj = 0;
+    for (int i = 0; i < v1.length; i++) {
+      float djk = v1[i] - centroid[i];
+      proj = fma(djk, originalResidual[i], proj);
+      sd = fma(djk, djk, sd);
+    }
+    result[0] = sd;
+    result[1] = proj;
+  }
+
   public static void calculateCentroidImpl(List<float[]> vectors, float[] centroid) {
     for (var vector : vectors) {
       assert vector.length == centroid.length;

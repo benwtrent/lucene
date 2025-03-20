@@ -446,16 +446,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     }
   }
 
-  // TODO Panama Vector
-  static float subtractAndDp(float[] v1, float[] v2, float[] dest) {
-    float res = 0f;
-    for (int i = 0; i < v1.length; i++) {
-      dest[i] = (v1[i] - v2[i]);
-      res += dest[i] * dest[i];
-    }
-    return res;
-  }
-
   // TODO, this is garbage slow, needs rewriting for IntArrayList[] clusters
   static void assignCentroidsSOAR(
       short[] primaryDocCentroids,
@@ -488,21 +478,19 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
             minSquaredDist = squareDist;
           }
         }
-        float n1 = subtractAndDp(vector, centroids[bestCentroid], centroidResidualScratch);
+        float n1 =
+            VectorUtil.subtractAndDp(vector, centroids[bestCentroid], centroidResidualScratch);
         float secondaryMinDist = Float.MAX_VALUE;
+        float[] sdProj = new float[2];
         for (short c = 0; c < numCentroids; c++) {
           if (c == bestCentroid) {
             continue;
           }
           float score = centroidDistancesScratch[c];
           if (SOAR_LAMBDA > 0) {
-            float sd = 0;
-            float proj = 0;
-            for (int i = 0; i < vectors.dimension(); i++) {
-              float djk = vector[i] - centroids[c][i];
-              sd += djk * djk;
-              proj += djk * centroidResidualScratch[i];
-            }
+            VectorUtil.soarResidual(vector, centroids[c], centroidResidualScratch, sdProj);
+            float sd = sdProj[0];
+            float proj = sdProj[1];
             score = sd + SOAR_LAMBDA * proj * proj / n1;
           }
           if (score < secondaryMinDist) {

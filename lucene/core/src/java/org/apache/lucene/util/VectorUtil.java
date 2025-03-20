@@ -385,4 +385,34 @@ public final class VectorUtil {
     assert centroid.length == vectors.get(0).length;
     IMPL.calculateCentroid(vectors, centroid);
   }
+
+  // calculates residual between v1 and v2, storing in result and calculates the dot product
+  public static float subtractAndDp(float[] v1, float[] v2, float[] result) {
+    if (v1.length != v2.length) {
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + v1.length + "!=" + v2.length);
+    }
+    if (result.length != v1.length) {
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + result.length + "!=" + v1.length);
+    }
+    return IMPL.subtractAndDp(v1, v2, result);
+  }
+
+  public static void soarResidual(
+      float[] v1, float[] centroid, float[] originalResidual, float[] result) {
+    if (v1.length != centroid.length) {
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + v1.length + "!=" + centroid.length);
+    }
+    if (originalResidual.length != v1.length) {
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + originalResidual.length + "!=" + v1.length);
+    }
+    if (result.length != 2) {
+      throw new IllegalArgumentException(
+          "only two results available for soar residual provided: " + result.length);
+    }
+    IMPL.soarResidual(v1, centroid, originalResidual, result);
+  }
 }

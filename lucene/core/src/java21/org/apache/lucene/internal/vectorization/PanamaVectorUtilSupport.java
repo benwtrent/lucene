@@ -1185,6 +1185,62 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
     return (1f - lambda) * xe * xe / norm2 + lambda * e;
   }
 
+  public float subtractAndDp(float[] v1, float[] v2, float[] result) {
+    assert v1.length == v2.length;
+    assert v1.length == result.length;
+    int i = 0;
+    float dp = 0;
+    if (v1.length > 2 * FLOAT_SPECIES.length()) {
+      FloatVector res = FloatVector.zero(FLOAT_SPECIES);
+      for (; i < FLOAT_SPECIES.loopBound(v1.length); i += FLOAT_SPECIES.length()) {
+        FloatVector v1Vec = FloatVector.fromArray(FLOAT_SPECIES, v1, i);
+        FloatVector v2Vec = FloatVector.fromArray(FLOAT_SPECIES, v2, i);
+        FloatVector subVec = v1Vec.sub(v2Vec);
+        res = fma(subVec, subVec, res);
+        subVec.intoArray(result, 0);
+      }
+      dp = res.reduceLanes(ADD);
+    }
+    // tail
+    for (; i < v1.length; i++) {
+      result[i] = v1[i] - v2[i];
+      dp = fma(result[i], result[i], dp);
+    }
+    return dp;
+  }
+
+  @Override
+  public void soarResidual(float[] v1, float[] centroid, float[] originalResidual, float[] result) {
+    assert v1.length == centroid.length;
+    assert v1.length == originalResidual.length;
+    assert result.length == 2;
+    float sd = 0;
+    float proj = 0;
+    int i = 0;
+    if (v1.length > 2 * FLOAT_SPECIES.length()) {
+      FloatVector sdVec = FloatVector.zero(FLOAT_SPECIES);
+      FloatVector projVec = FloatVector.zero(FLOAT_SPECIES);
+      for (; i < FLOAT_SPECIES.loopBound(v1.length); i += FLOAT_SPECIES.length()) {
+        FloatVector v1Vec = FloatVector.fromArray(FLOAT_SPECIES, v1, i);
+        FloatVector centroidVec = FloatVector.fromArray(FLOAT_SPECIES, centroid, i);
+        FloatVector originalResidualVec = FloatVector.fromArray(FLOAT_SPECIES, originalResidual, i);
+        FloatVector djkVec = v1Vec.sub(centroidVec);
+        sdVec = fma(djkVec, djkVec, sdVec);
+        projVec = fma(djkVec, originalResidualVec, projVec);
+      }
+      sd += sdVec.reduceLanes(ADD);
+      proj += projVec.reduceLanes(ADD);
+    }
+    // tail
+    for (; i < v1.length; i++) {
+      float djk = v1[i] - centroid[i];
+      proj = fma(djk, originalResidual[i], proj);
+      sd = fma(djk, djk, sd);
+    }
+    result[0] = sd;
+    result[1] = proj;
+  }
+
   public void calculateCentroid(List<float[]> vectors, float[] centroid) {
     assert vectors.size() > 0;
     DefaultVectorUtilSupport.calculateCentroidImpl(vectors, centroid);
