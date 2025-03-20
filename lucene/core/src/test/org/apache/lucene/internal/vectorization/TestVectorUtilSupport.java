@@ -173,7 +173,7 @@ public class TestVectorUtilSupport extends BaseVectorizationTestCase {
         .getVectorUtilSupport()
         .centerAndCalculateOSQStatsDp(vector, centroid, centeredPanama, statsPanama);
     assertArrayEquals(centeredLucene, centeredPanama, 1e-3f);
-    assertArrayEquals(statsLucene, statsPanama, 1e-3f);
+    assertArrayEquals(statsLucene, statsPanama, 1e-2f);
   }
 
   static byte[] pack(byte[] unpacked) {

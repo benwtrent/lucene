@@ -336,15 +336,18 @@ public final class VectorUtil {
   }
 
   public static float calculateOSQLoss(
-      float[] target, float[] interval, float step, float invStep, float norm2, float lambda) {
+      float[] target, float[] interval, int points, float norm2, float lambda) {
     assert interval.length == 2;
+    float step = ((interval[1] - interval[0]) / (points - 1.0F));
+    float invStep = 1f / step;
     return IMPL.calculateOSQLoss(target, interval, step, invStep, norm2, lambda);
   }
 
   public static void calculateOSQGridPoints(
-      float[] target, float[] interval, int points, float invStep, float[] pts) {
+      float[] target, float[] interval, int points, float[] pts) {
     assert interval.length == 2;
     assert pts.length == 5;
+    float invStep = (points - 1.0F) / (interval[1] - interval[0]);
     IMPL.calculateOSQGridPoints(target, interval, points, invStep, pts);
   }
 
@@ -352,12 +355,23 @@ public final class VectorUtil {
       float[] target, float[] centroid, float[] centered, float[] stats) {
     assert target.length == centroid.length;
     assert stats.length == 5;
+    if (target.length != centroid.length) {
+      throw new IllegalArgumentException("vector dimensions differ: " + target.length + "!=" + centroid.length);
+    }
+    if (centered.length != target.length) {
+      throw new IllegalArgumentException("vector dimensions differ: " + centered.length + "!=" + target.length);
+    }
     IMPL.centerAndCalculateOSQStatsEuclidean(target, centroid, centered, stats);
   }
 
   public static void centerAndCalculateOSQStatsDp(
       float[] target, float[] centroid, float[] centered, float[] stats) {
-    assert target.length == centroid.length;
+    if (target.length != centroid.length) {
+      throw new IllegalArgumentException("vector dimensions differ: " + target.length + "!=" + centroid.length);
+    }
+    if (centered.length != target.length) {
+      throw new IllegalArgumentException("vector dimensions differ: " + centered.length + "!=" + target.length);
+    }
     assert stats.length == 6;
     IMPL.centerAndCalculateOSQStatsDp(target, centroid, centered, stats);
   }

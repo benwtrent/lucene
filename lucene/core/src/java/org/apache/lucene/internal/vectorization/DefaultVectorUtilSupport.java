@@ -275,7 +275,8 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
       norm2 = fma(centered[i], centered[i], norm2);
       float delta = centered[i] - vecMean;
       vecMean += delta / (i + 1);
-      vecVar = fma(delta, (centered[i] - vecMean), vecVar);
+      float delta2 = centered[i] - vecMean;
+      vecVar = fma(delta, delta2, vecVar);
     }
     stats[0] = vecMean;
     stats[1] = vecVar / vector.length;

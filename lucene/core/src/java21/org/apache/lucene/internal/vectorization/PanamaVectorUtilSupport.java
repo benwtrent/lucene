@@ -919,28 +919,32 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
   @Override
   public void centerAndCalculateOSQStatsEuclidean(
       float[] vector, float[] centroid, float[] centered, float[] stats) {
+    assert vector.length == centroid.length;
+    assert vector.length == centered.length;
     float vecMean = 0;
     float vecVar = 0;
     float norm2 = 0;
     float min = Float.MAX_VALUE;
     float max = -Float.MAX_VALUE;
     int i = 0;
+    int vectCount = 0;
     if (vector.length > 2 * FLOAT_SPECIES.length()) {
       FloatVector vecMeanVec = FloatVector.zero(FLOAT_SPECIES);
       FloatVector m2Vec = FloatVector.zero(FLOAT_SPECIES);
       FloatVector norm2Vec = FloatVector.zero(FLOAT_SPECIES);
       FloatVector minVec = FloatVector.broadcast(FLOAT_SPECIES, Float.MAX_VALUE);
       FloatVector maxVec = FloatVector.broadcast(FLOAT_SPECIES, -Float.MAX_VALUE);
-      FloatVector countVec = FloatVector.broadcast(FLOAT_SPECIES, 0);
+      int count = 0;
       for (; i < FLOAT_SPECIES.loopBound(vector.length); i += FLOAT_SPECIES.length()) {
+        ++count;
         FloatVector v = FloatVector.fromArray(FLOAT_SPECIES, vector, i);
         FloatVector c = FloatVector.fromArray(FLOAT_SPECIES, centroid, i);
         FloatVector centeredVec = v.sub(c);
         FloatVector deltaVec = centeredVec.sub(vecMeanVec);
-        countVec = countVec.add(FloatVector.broadcast(FLOAT_SPECIES, 1));
-        norm2Vec = norm2Vec.add(centeredVec.mul(centeredVec));
-        vecMeanVec = vecMeanVec.add(deltaVec.div(countVec));
-        m2Vec = m2Vec.add(deltaVec.mul(centeredVec.sub(vecMeanVec)));
+        norm2Vec = fma(centeredVec, centeredVec, norm2Vec);
+        vecMeanVec = vecMeanVec.add(deltaVec.div(count));
+        FloatVector delta2Vec = centeredVec.sub(vecMeanVec);
+        m2Vec = fma(deltaVec, delta2Vec, m2Vec);
         minVec = minVec.min(centeredVec);
         maxVec = maxVec.max(centeredVec);
         centeredVec.intoArray(centered, i);
@@ -949,23 +953,43 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
       max = maxVec.reduceLanes(MAX);
       norm2 = norm2Vec.reduceLanes(ADD);
       vecMean = vecMeanVec.reduceLanes(ADD) / FLOAT_SPECIES.length();
-      vecVar = m2Vec.reduceLanes(ADD) / countVec.reduceLanes(ADD);
+      FloatVector d2Mean = vecMeanVec.sub(vecMean);
+      m2Vec = fma(d2Mean, d2Mean, m2Vec);
+      vectCount = count * FLOAT_SPECIES.length();
+      vecVar = m2Vec.reduceLanes(ADD);
     }
 
-    float tailVecVar = 0;
+    float tailMean = 0;
+    float tailM2 = 0;
+    int tailCount = 0;
     // handle the tail
     for (; i < vector.length; i++) {
       centered[i] = vector[i] - centroid[i];
-      float delta = centered[i] - vecMean;
-      vecMean += delta / (i + 1);
-      tailVecVar = fma(delta, (centered[i] - vecMean), tailVecVar);
+      float delta = centered[i] - tailMean;
+      ++tailCount;
+      tailMean += delta / tailCount;
+      float delta2 = centered[i] - tailMean;
+      tailM2 = fma(delta, delta2, tailM2);
       min = Math.min(min, centered[i]);
       max = Math.max(max, centered[i]);
       norm2 = fma(centered[i], centered[i], norm2);
     }
+    if (vectCount == 0) {
+      vecMean = tailMean;
+      vecVar = tailM2;
+    } else if (tailCount > 0) {
+      int totalCount = tailCount + vectCount;
+      assert totalCount == vector.length;
+      float alpha = (float) vectCount / totalCount;
+      float beta = 1f - alpha;
+      float completeMean = alpha * vecMean + beta * tailMean;
+      float dMean2Lhs = (vecMean - completeMean) * (vecMean - completeMean);
+      float dMean2Rhs = (tailMean - completeMean) * (tailMean - completeMean);
+      vecVar = (vecVar + dMean2Lhs) + beta * (tailM2 + dMean2Rhs);
+      vecMean = completeMean;
+    }
     stats[0] = vecMean;
-    // TODO this ain' correct, but I am not sure what to do
-    stats[1] = tailVecVar / vector.length + vecVar;
+    stats[1] = vecVar / vector.length;
     stats[2] = norm2;
     stats[3] = min;
     stats[4] = max;
@@ -974,6 +998,8 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
   @Override
   public void centerAndCalculateOSQStatsDp(
       float[] vector, float[] centroid, float[] centered, float[] stats) {
+    assert vector.length == centroid.length;
+    assert vector.length == centered.length;
     float vecMean = 0;
     float vecVar = 0;
     float norm2 = 0;
@@ -981,6 +1007,7 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
     float max = -Float.MAX_VALUE;
     float centroidDot = 0;
     int i = 0;
+    int vectCount = 0;
     int loopBound = FLOAT_SPECIES.loopBound(vector.length);
     if (vector.length > 2 * FLOAT_SPECIES.length()) {
       FloatVector vecMeanVec = FloatVector.zero(FLOAT_SPECIES);
@@ -988,20 +1015,19 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
       FloatVector norm2Vec = FloatVector.zero(FLOAT_SPECIES);
       FloatVector minVec = FloatVector.broadcast(FLOAT_SPECIES, Float.MAX_VALUE);
       FloatVector maxVec = FloatVector.broadcast(FLOAT_SPECIES, -Float.MAX_VALUE);
-      FloatVector countVec = FloatVector.broadcast(FLOAT_SPECIES, 0);
       FloatVector centroidDotVec = FloatVector.zero(FLOAT_SPECIES);
+      int count = 0;
       for (; i < loopBound; i += FLOAT_SPECIES.length()) {
+        ++count;
         FloatVector v = FloatVector.fromArray(FLOAT_SPECIES, vector, i);
         FloatVector c = FloatVector.fromArray(FLOAT_SPECIES, centroid, i);
-        centroidDotVec = centroidDotVec.add(v.mul(c));
+        centroidDotVec = fma(v, c, centroidDotVec);
         FloatVector centeredVec = v.sub(c);
         FloatVector deltaVec = centeredVec.sub(vecMeanVec);
-        countVec = countVec.add(FloatVector.broadcast(FLOAT_SPECIES, 1));
-        norm2Vec = norm2Vec.add(centeredVec.mul(centeredVec));
-        vecMeanVec = vecMeanVec.add(deltaVec.div(countVec));
-        // var
+        norm2Vec = fma(centeredVec, centeredVec, norm2Vec);
+        vecMeanVec = vecMeanVec.add(deltaVec.div(count));
         FloatVector delta2Vec = centeredVec.sub(vecMeanVec);
-        m2Vec = m2Vec.add(deltaVec.mul(delta2Vec));
+        m2Vec = fma(deltaVec, delta2Vec, m2Vec);
         minVec = minVec.min(centeredVec);
         maxVec = maxVec.max(centeredVec);
         centeredVec.intoArray(centered, i);
@@ -1011,26 +1037,44 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
       norm2 = norm2Vec.reduceLanes(ADD);
       centroidDot = centroidDotVec.reduceLanes(ADD);
       vecMean = vecMeanVec.reduceLanes(ADD) / FLOAT_SPECIES.length();
-      // Is it this simple? I would have thought we need to
-      vecVar = m2Vec.reduceLanes(ADD) / countVec.reduceLanes(ADD);
+      FloatVector d2Mean = vecMeanVec.sub(vecMean);
+      m2Vec = fma(d2Mean, d2Mean, m2Vec);
+      vectCount = count * FLOAT_SPECIES.length();
+      vecVar = m2Vec.reduceLanes(ADD);
     }
 
-    float tailVecVar = 0;
-
+    float tailMean = 0;
+    float tailM2 = 0;
+    int tailCount = 0;
     // handle the tail
     for (; i < vector.length; i++) {
       centroidDot = fma(vector[i], centroid[i], centroidDot);
       centered[i] = vector[i] - centroid[i];
-      float delta = centered[i] - vecMean;
-      vecMean += delta / (i + 1);
-      tailVecVar = fma(delta, (centered[i] - vecMean), tailVecVar);
+      float delta = centered[i] - tailMean;
+      ++tailCount;
+      tailMean += delta / tailCount;
+      float delta2 = centered[i] - tailMean;
+      tailM2 = fma(delta, delta2, tailM2);
       min = Math.min(min, centered[i]);
       max = Math.max(max, centered[i]);
       norm2 = fma(centered[i], centered[i], norm2);
     }
+    if (vectCount == 0) {
+      vecMean = tailMean;
+      vecVar = tailM2;
+    } else if (tailCount > 0) {
+      int totalCount = tailCount + vectCount;
+      assert totalCount == vector.length;
+      float alpha = (float) vectCount / totalCount;
+      float beta = 1f - alpha;
+      float completeMean = alpha * vecMean + beta * tailMean;
+      float dMean2Lhs = (vecMean - completeMean) * (vecMean - completeMean);
+      float dMean2Rhs = (tailMean - completeMean) * (tailMean - completeMean);
+      vecVar = (vecVar + dMean2Lhs) + beta * (tailM2 + dMean2Rhs);
+      vecMean = completeMean;
+    }
     stats[0] = vecMean;
-    // TODO this ain' correct, but I am not sure what to do
-    stats[1] = tailVecVar / vector.length + vecVar;
+    stats[1] = vecVar / vector.length;
     stats[2] = norm2;
     stats[3] = min;
     stats[4] = max;
@@ -1072,11 +1116,11 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
         FloatVector kVec = xiqint.convert(VectorOperators.I2F, 0).reinterpretAsFloats();
         FloatVector sVec = kVec.div(pmOnes);
         FloatVector smVec = ones.sub(sVec);
-        daaVec = daaVec.add(smVec.mul(smVec));
-        dabVec = dabVec.add(smVec.mul(sVec));
-        dbbVec = dbbVec.add(sVec.mul(sVec));
-        daxVec = daxVec.add(v.mul(smVec));
-        dbxVec = dbxVec.add(v.mul(sVec));
+        daaVec = fma(smVec, smVec, daaVec);
+        dabVec = fma(smVec, sVec, dabVec);
+        dbbVec = fma(sVec, sVec, dbbVec);
+        daxVec = fma(v, smVec, daxVec);
+        dbxVec = fma(v, sVec, dbxVec);
       }
       daa = daaVec.reduceLanes(ADD);
       dab = dabVec.reduceLanes(ADD);
@@ -1120,12 +1164,10 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
         FloatVector vClamped = v.max(a).min(b);
         Vector<Integer> xiqint =
             vClamped.sub(a).mul(invStep).add(0.5f).convert(VectorOperators.F2I, 0);
-        FloatVector xiq =
-            xiqint.convert(VectorOperators.I2F, 0).reinterpretAsFloats().mul(step).add(a);
+        FloatVector xiq = xiqint.reinterpretAsFloats().mul(step).add(a);
         FloatVector xiiq = v.sub(xiq);
-        FloatVector xiiq2 = xiiq.mul(xiiq);
-        xeVec = xeVec.add(xiiq.mul(v));
-        eVec = eVec.add(xiiq2);
+        xeVec = fma(v, xiiq, xeVec);
+        eVec = fma(xiiq, xiiq, eVec);
       }
       e = eVec.reduceLanes(ADD);
       xe = xeVec.reduceLanes(ADD);
