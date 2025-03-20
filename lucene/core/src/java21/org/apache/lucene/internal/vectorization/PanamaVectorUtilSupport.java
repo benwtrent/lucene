@@ -1062,15 +1062,14 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
       for (; i < FLOAT_SPECIES.loopBound(target.length); i += FLOAT_SPECIES.length()) {
         FloatVector v = FloatVector.fromArray(FLOAT_SPECIES, target, i);
         FloatVector vClamped = v.max(a).min(b);
-        FloatVector kVec =
+        Vector<Integer> xiqint =
             vClamped
                 .sub(a)
                 .mul(invStep)
                 // round
                 .add(0.5f)
-                .convert(VectorOperators.F2I, 0)
-                .convert(VectorOperators.I2F, 0)
-                .reinterpretAsFloats();
+                .convert(VectorOperators.F2I, 0);
+        FloatVector kVec = xiqint.convert(VectorOperators.I2F, 0).reinterpretAsFloats();
         FloatVector sVec = kVec.div(pmOnes);
         FloatVector smVec = ones.sub(sVec);
         daaVec = daaVec.add(smVec.mul(smVec));
