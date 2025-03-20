@@ -30,9 +30,7 @@ import org.apache.lucene.internal.hppc.IntArrayList;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.ArrayUtil;
-import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.SuppressForbidden;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 
@@ -42,15 +40,6 @@ import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
  * fashion.
  */
 public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
-
-  @SuppressForbidden(reason = "Uses FMA only where fast and carefully contained")
-  private static float fma(float a, float b, float c) {
-    if (Constants.HAS_FAST_SCALAR_FMA) {
-      return Math.fma(a, b, c);
-    } else {
-      return a * b + c;
-    }
-  }
 
   static final float SOAR_LAMBDA = 0f;
 
@@ -121,8 +110,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
     byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
-    for (int i = 0; i < centroids.length; i++) {
-      System.arraycopy(centroids[i], 0, centroidScratch, 0, centroids[i].length);
+    for (float[] centroid : centroids) {
+      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
       OptimizedScalarQuantizer.QuantizationResult quantizedCentroidResults =
           osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
       IVFUtils.writeQuantizedValue(centroidOutput, quantizedScratch, quantizedCentroidResults);
@@ -130,8 +119,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     final ByteBuffer buffer =
         ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
             .order(ByteOrder.LITTLE_ENDIAN);
-    for (int i = 0; i < centroids.length; i++) {
-      buffer.asFloatBuffer().put(centroids[i]);
+    for (float[] centroid : centroids) {
+      buffer.asFloatBuffer().put(centroid);
       centroidOutput.writeBytes(buffer.array(), buffer.array().length);
     }
     return new OnHeapCentroidAssignmentScorer(centroids);
@@ -174,10 +163,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       int lastDocId = -1;
       docIdBuffer =
           size > docIdBuffer.length ? ArrayUtil.growExact(docIdBuffer, size) : docIdBuffer;
-      int[] dumb = new int[size];
       for (int j = 0; j < size; j++) {
         int docId = floatVectorValues.ordToDoc(cluster.get(j));
-        dumb[j] = docId;
         assert lastDocId < 0 || docId >= lastDocId;
         if (lastDocId >= 0) {
           docIdBuffer[j] = docId - lastDocId;
@@ -298,8 +285,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
     float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
-    for (int i = 0; i < centroids.length; i++) {
-      System.arraycopy(centroids[i], 0, centroidScratch, 0, centroids[i].length);
+    for (float[] centroid : centroids) {
+      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
       OptimizedScalarQuantizer.QuantizationResult result =
           osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
       IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
@@ -307,8 +294,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     final ByteBuffer buffer =
         ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
             .order(ByteOrder.LITTLE_ENDIAN);
-    for (int i = 0; i < centroids.length; i++) {
-      buffer.asFloatBuffer().put(centroids[i]);
+    for (float[] centroid : centroids) {
+      buffer.asFloatBuffer().put(centroid);
       temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
     }
     return centroids.length;

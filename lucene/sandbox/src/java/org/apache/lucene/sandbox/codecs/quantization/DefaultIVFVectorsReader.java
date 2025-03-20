@@ -212,14 +212,14 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       float centroidDp,
       VectorSimilarityFunction similarityFunction) {
     float qcDist = VectorUtil.int4DotProduct(quantizedQuery, binaryCode);
-    float x1 = targetComponentSum;
     float ax = targetCorrections[0];
     // Here we assume `lx` is simply bit vectors, so the scaling isn't necessary
     float lx = (targetCorrections[1] - ax) * FOUR_BIT_SCALE;
     float ay = queryCorrections.lowerInterval();
     float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
     float y1 = queryCorrections.quantizedComponentSum();
-    float score = ax * ay * dims + ay * lx * x1 + ax * ly * y1 + lx * ly * qcDist;
+    float score =
+        ax * ay * dims + ay * lx * (float) targetComponentSum + ax * ly * y1 + lx * ly * qcDist;
     if (similarityFunction == EUCLIDEAN) {
       score = queryCorrections.additionalCorrection() + targetCorrections[2] - 2 * score;
       return Math.max(1 / (1f + score), 0);
@@ -242,14 +242,14 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       int targetComponentSum,
       float centroidDp,
       VectorSimilarityFunction similarityFunction) {
-    float x1 = targetComponentSum;
     float ax = targetCorrections[0];
     // Here we assume `lx` is simply bit vectors, so the scaling isn't necessary
     float lx = targetCorrections[1] - ax;
     float ay = queryCorrections.lowerInterval();
     float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
     float y1 = queryCorrections.quantizedComponentSum();
-    float score = ax * ay * dims + ay * lx * x1 + ax * ly * y1 + lx * ly * qcDist;
+    float score =
+        ax * ay * dims + ay * lx * (float) targetComponentSum + ax * ly * y1 + lx * ly * qcDist;
     // For euclidean, we need to invert the score and apply the additional correction, which is
     // assumed to be the squared l2norm of the centroid centered vectors.
     if (similarityFunction == EUCLIDEAN) {
