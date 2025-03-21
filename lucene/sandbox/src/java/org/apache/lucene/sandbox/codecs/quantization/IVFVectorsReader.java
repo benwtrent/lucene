@@ -9,7 +9,6 @@ package org.apache.lucene.sandbox.codecs.quantization;
 import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.SIMILARITY_FUNCTIONS;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.function.IntPredicate;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.KnnVectorsReader;
@@ -35,6 +34,7 @@ import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.hnsw.NeighborQueue;
 
 /**
  * @lucene.experimental
@@ -99,7 +99,11 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   }
 
   protected abstract IVFUtils.CentroidQueryScorer getCentroidScorer(
-      FieldInfo fieldInfo, int numCentroids, IndexInput centroids, float[] target)
+      FieldInfo fieldInfo,
+      int numCentroids,
+      IndexInput centroids,
+      float[] target,
+      IndexInput clusters)
       throws IOException;
 
   protected abstract FloatVectorValues getCentroids(
@@ -263,10 +267,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
           if (visitedDocs.getAndSet(docId)) {
             return false;
           }
-          if (acceptDocs != null && acceptDocs.get(docId) == false) {
-            return false;
-          }
-          return true;
+          return acceptDocs == null || acceptDocs.get(docId) != false;
         };
 
     FieldEntry entry = fields.get(fieldInfo.number);
@@ -275,20 +276,41 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
             fieldInfo,
             entry.postingListOffsetsAndLengths.length,
             entry.centroidSlice(ivfCentroids),
-            target);
-    final Iterator<PostingListWithFileOffsetWithScore> topPostingLists =
+            target,
+            ivfClusters);
+    int centroidsToSearch = nProbe;
+    if (centroidsToSearch <= 0) {
+      centroidsToSearch = Math.max(((knnCollector.k() * 300) / 1_000), 1);
+    }
+    final NeighborQueue centroidQueue =
         scorePostingLists(fieldInfo, knnCollector, centroidQueryScorer, nProbe);
     IVFUtils.PostingsScorer scorer = getPostingScorer(fieldInfo, ivfClusters, target, needsScoring);
-    while (topPostingLists.hasNext()) {
-      final PostingListWithFileOffsetWithScore next = topPostingLists.next();
-      // TODO can we remove the direct access to the centroid?
-      scorer.resetPostingsScorer(
-          next.postingListWithFileOffset().centroidOrdinal(),
-          centroidQueryScorer.centroid(next.postingListWithFileOffset().centroidOrdinal()));
+    int centroidsVisited = 0;
+    long expectedDocs = 0;
+    long actualDocs = 0;
+    // initially we visit only the "centroids to search"
+    while (centroidQueue.size() > 0 && centroidsVisited < centroidsToSearch) {
+      ++centroidsVisited;
+      // todo do we actually need to know the score???
+      int centroidOrdinal = centroidQueue.pop();
+      // todo do we need direct access to the raw centroid???
+      scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
+      expectedDocs += scorer.cost();
       while (scorer.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
-        if (knnCollector.earlyTerminated()) {
-          return;
-        }
+        ++actualDocs;
+        knnCollector.incVisitedCount(1);
+        knnCollector.collect(scorer.docID(), scorer.score());
+      }
+    }
+    // if we are using a filtered search, we need to account for the documents that were filtered
+    // so continue exploring past centroidsToSearch until we reach the expected number of documents
+    // TODO, can we pick something smarter than 0.9? Something related to average posting list size?
+    float expectedScored = expectedDocs * 0.9f;
+    while (acceptDocs != null && centroidQueue.size() > 0 && actualDocs < expectedScored) {
+      int centroidOrdinal = centroidQueue.pop();
+      scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
+      while (scorer.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+        actualDocs++;
         knnCollector.incVisitedCount(1);
         knnCollector.collect(scorer.docID(), scorer.score());
       }
@@ -310,7 +332,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
   }
 
-  abstract Iterator<PostingListWithFileOffsetWithScore> scorePostingLists(
+  abstract NeighborQueue scorePostingLists(
       FieldInfo fieldInfo,
       KnnCollector knnCollector,
       IVFUtils.CentroidQueryScorer centroidQueryScorer,

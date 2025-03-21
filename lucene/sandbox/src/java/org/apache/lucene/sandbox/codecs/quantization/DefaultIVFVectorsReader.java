@@ -14,9 +14,6 @@ import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.discr
 import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.transposeHalfByte;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
 import java.util.function.IntPredicate;
 import org.apache.lucene.codecs.hnsw.FlatVectorsReader;
 import org.apache.lucene.index.FieldInfo;
@@ -30,8 +27,8 @@ import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.GroupVIntUtil;
-import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.VectorUtil;
+import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 
 /**
@@ -52,10 +49,15 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
 
   @Override
   protected IVFUtils.CentroidQueryScorer getCentroidScorer(
-      FieldInfo fieldInfo, int numCentroids, IndexInput centroids, float[] targetQuery)
+      FieldInfo fieldInfo,
+      int numCentroids,
+      IndexInput centroids,
+      float[] targetQuery,
+      IndexInput clusters)
       throws IOException {
-    float[] globalCentroid = fields.get(fieldInfo.number).globalCentroid();
-    float globalCentroidDp = fields.get(fieldInfo.number).globalCentroidDp();
+    FieldEntry fieldEntry = fields.get(fieldInfo.number);
+    float[] globalCentroid = fieldEntry.globalCentroid();
+    float globalCentroidDp = fieldEntry.globalCentroidDp();
     OptimizedScalarQuantizer scalarQuantizer =
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     byte[] quantized = new byte[targetQuery.length];
@@ -124,69 +126,24 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   @Override
-  protected Iterator<PostingListWithFileOffsetWithScore> scorePostingLists(
+  protected NeighborQueue scorePostingLists(
       FieldInfo fieldInfo,
       KnnCollector knnCollector,
       IVFUtils.CentroidQueryScorer centroidQueryScorer,
       int nProbe)
       throws IOException {
-    List<Integer> preferredCentroids = null;
     if (knnCollector.getSearchStrategy() instanceof IVFKnnSearchStrategy searchStrategy) {
-      preferredCentroids = searchStrategy.getCentroids();
-    }
-    if (preferredCentroids != null && preferredCentroids.isEmpty()) {
-      return Arrays.stream(new PostingListWithFileOffsetWithScore[0]).iterator();
-    }
-    int centroidsToReturn = nProbe;
-    if (centroidsToReturn <= 0) {
-      centroidsToReturn = Math.max(((knnCollector.k() * 300) / 1_000), 1);
-    }
-    if (preferredCentroids != null) {
-      centroidsToReturn = Math.min(centroidsToReturn, preferredCentroids.size());
-    }
-    FieldEntry fieldEntry = fields.get(fieldInfo.number);
-    // TODO: improve the heuristic here. It does not work they there are many deleted documents or
-    // restrictive filter.
-    final int postingListsToScore =
-        preferredCentroids == null
-            ? Math.min(centroidQueryScorer.size(), centroidsToReturn)
-            : centroidsToReturn;
-    final PriorityQueue<PostingListWithFileOffsetWithScore> pq =
-        new PriorityQueue<>(postingListsToScore) {
-          @Override
-          protected boolean lessThan(
-              PostingListWithFileOffsetWithScore a, PostingListWithFileOffsetWithScore b) {
-            return a.score() < b.score();
-          }
-        };
-    if (preferredCentroids != null) {
-      for (int centroid : preferredCentroids) {
-        knnCollector.incVisitedClusterCount(1);
-        float score = centroidQueryScorer.score(centroid);
-        pq.insertWithOverflow(
-            new PostingListWithFileOffsetWithScore(
-                new PostingListWithFileOffset(
-                    centroid, fieldEntry.postingListOffsetsAndLengths()[centroid]),
-                score));
-      }
-    } else {
-      for (int centroid = 0; centroid < centroidQueryScorer.size(); centroid++) {
-        knnCollector.incVisitedClusterCount(1);
-        float score = centroidQueryScorer.score(centroid);
-        pq.insertWithOverflow(
-            new PostingListWithFileOffsetWithScore(
-                new PostingListWithFileOffset(
-                    centroid, fieldEntry.postingListOffsetsAndLengths()[centroid]),
-                score));
+      if (searchStrategy.getCentroids() != null) {
+        throw new IllegalArgumentException("preferred centroids not yet supported");
       }
     }
 
-    final PostingListWithFileOffsetWithScore[] topCentroids =
-        new PostingListWithFileOffsetWithScore[postingListsToScore];
-    for (int i = 1; i <= postingListsToScore; i++) {
-      topCentroids[postingListsToScore - i] = pq.pop();
+    NeighborQueue neighborQueue = new NeighborQueue(centroidQueryScorer.size(), true);
+    // TODO Off heap scoring for quantized centroids?
+    for (int centroid = 0; centroid < centroidQueryScorer.size(); centroid++) {
+      neighborQueue.add(centroid, centroidQueryScorer.score(centroid));
     }
-    return Arrays.stream(topCentroids).iterator();
+    return neighborQueue;
   }
 
   static void prefixSum(int[] buffer, int count) {
@@ -202,6 +159,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     return new MemorySegmentPostingsScorer(target, indexInput, entry, fieldInfo, needsScoring);
   }
 
+  // TODO can we do this in off-heap blocks?
   static float int4QuantizedScore(
       byte[] quantizedQuery,
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
@@ -373,10 +331,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       centroidDp = Float.intBitsToFloat(postingsSlice.readInt());
       this.centroid = centroid;
       // read the doc ids
-      docIdsScratch =
-          vectors > docIdsScratch.length
-              ? ArrayUtil.growExact(docIdsScratch, vectors)
-              : docIdsScratch;
+      docIdsScratch = vectors > docIdsScratch.length ? new int[vectors] : docIdsScratch;
       GroupVIntUtil.readGroupVInts(postingsSlice, docIdsScratch, vectors);
       prefixSum(docIdsScratch, vectors);
       slicePos = postingsSlice.getFilePointer();
