@@ -32,6 +32,7 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.VectorUtil;
+import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 
 /**
@@ -41,7 +42,8 @@ import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
  */
 public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
-  static final float SOAR_LAMBDA = 0f;
+  static final boolean OVERSPILL_ENABLED = false;
+  static final float SOAR_LAMBDA = 1.0f;
 
   private final int vectorPerCluster;
 
@@ -409,94 +411,93 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       throws IOException {
     // TODO, can we initialize the vector centroid search space by their own individual centroids?
     //  e.g. find the nearest N centroids for centroid Y containing vector X, and only consider
-    // those for assignment
+    //  those for assignment
     //  of vector X (and all other vectors within that centroid).
     short numCentroids = (short) scorer.size();
+    // If soar > 0, then we actually need to apply the projection, otherwise, its just the second
+    // nearest centroid
+    // we at most will look at the 5 nearest centroids if possible
+    int soarClusterCheckCount = Math.min(numCentroids, 5);
+    // if lambda is `0`, that just means overspill to the second nearest, so we will only check the
+    // second nearest
+    if (SOAR_LAMBDA == 0) {
+      soarClusterCheckCount = Math.min(1, soarClusterCheckCount);
+    }
+    if (OVERSPILL_ENABLED == false) {
+      soarClusterCheckCount = 0;
+    }
+    NeighborQueue neighborsToCheck = new NeighborQueue(soarClusterCheckCount + 1, true);
+    float[] scores = new float[soarClusterCheckCount];
+    int[] centroids = new int[soarClusterCheckCount];
+    float[] scratch = new float[vectors.dimension()];
     for (int docID = 0; docID < vectors.size(); docID++) {
       float[] vector = vectors.vectorValue(docID);
       scorer.setScoringVector(vector);
-      short bestCentroid = 0;
+      int bestCentroid = 0;
+      float bestScore = Float.MAX_VALUE;
       if (numCentroids > 1) {
-        float minSquaredDist = Float.MAX_VALUE;
         for (short c = 0; c < numCentroids; c++) {
           float squareDist = scorer.score(c);
-          if (squareDist < minSquaredDist) {
-            bestCentroid = c;
-            minSquaredDist = squareDist;
-          }
+          neighborsToCheck.insertWithOverflow(c, squareDist);
         }
+        // pop the best
+        for (int i = soarClusterCheckCount - 1; i >= 0; i--) {
+          scores[i] = neighborsToCheck.topScore();
+          centroids[i] = neighborsToCheck.pop();
+        }
+        bestScore = neighborsToCheck.topScore();
+        bestCentroid = neighborsToCheck.pop();
       }
       if (clusters[bestCentroid] == null) {
         clusters[bestCentroid] = new IntArrayList(16);
       }
       clusters[bestCentroid].add(docID);
+      if (soarClusterCheckCount > 0) {
+        assignCentroidSOAR(
+            docID,
+            scorer.centroid(bestCentroid),
+            bestScore,
+            scratch,
+            centroids,
+            scores,
+            scorer,
+            vectors,
+            clusters);
+      }
+      neighborsToCheck.clear();
     }
   }
 
-  // TODO, this is garbage slow, needs rewriting for IntArrayList[] clusters
-  static void assignCentroidsSOAR(
-      short[] primaryDocCentroids,
-      short[] secondaryDocCentroids,
-      int[] centroidSize,
-      boolean normalizeCentroids,
+  static void assignCentroidSOAR(
+      int docId,
+      float[] bestCentroid,
+      float bestScore,
+      float[] scratch,
+      int[] centroidsToCheck,
+      float[] centroidsToCheckScore,
+      IVFUtils.CentroidAssignmentScorer scorer,
       FloatVectorValues vectors,
-      float[][] centroids)
+      IntArrayList[] clusters)
       throws IOException {
-    // TODO, can we initialize the vector centroid search space by their own individual centroids?
-    //  e.g. find the nearest N centroids for centroid Y containing vector X, and only consider
-    // those for assignment
-    //  of vector X (and all other vectors within that centroid).
-    short numCentroids = (short) centroids.length;
-    assert Arrays.stream(centroidSize).allMatch(size -> size == 0);
-    float[] centroidResidualScratch = new float[vectors.dimension()];
-    float[] centroidDistancesScratch = new float[numCentroids];
-    for (int docID = 0; docID < vectors.size(); docID++) {
-      float[] vector = vectors.vectorValue(docID);
-      short bestCentroid = 0;
-      short bestSecondaryCentroid = 0;
-      if (numCentroids > 1) {
-        float minSquaredDist = Float.MAX_VALUE;
-        for (short c = 0; c < numCentroids; c++) {
-          // TODO: replace with RandomVectorScorer::score possible on quantized vectors
-          float squareDist = VectorUtil.squareDistance(centroids[c], vector);
-          centroidDistancesScratch[c] = squareDist;
-          if (squareDist < minSquaredDist) {
-            bestCentroid = c;
-            minSquaredDist = squareDist;
-          }
-        }
-        float n1 =
-            VectorUtil.subtractAndDp(vector, centroids[bestCentroid], centroidResidualScratch);
-        float secondaryMinDist = Float.MAX_VALUE;
-        float[] sdProj = new float[2];
-        for (short c = 0; c < numCentroids; c++) {
-          if (c == bestCentroid) {
-            continue;
-          }
-          float score = centroidDistancesScratch[c];
-          if (SOAR_LAMBDA > 0) {
-            VectorUtil.soarResidual(vector, centroids[c], centroidResidualScratch, sdProj);
-            float sd = sdProj[0];
-            float proj = sdProj[1];
-            score = sd + SOAR_LAMBDA * proj * proj / n1;
-          }
-          if (score < secondaryMinDist) {
-            bestSecondaryCentroid = c;
-            secondaryMinDist = score;
-          }
-        }
+    float[] vector = vectors.vectorValue(docId);
+    VectorUtil.subtract(vector, bestCentroid, scratch);
+    int bestSecondaryCentroid = -1;
+    float minDist = Float.MAX_VALUE;
+    for (int i = 0; i < centroidsToCheck.length; i++) {
+      float score = centroidsToCheckScore[i];
+      int centroidOrdinal = centroidsToCheck[i];
+      if (SOAR_LAMBDA > 0) {
+        float proj = VectorUtil.soarResidual(vector, scorer.centroid(centroidOrdinal), scratch);
+        score += SOAR_LAMBDA * proj * proj / bestScore;
       }
-      centroidSize[bestCentroid] += 1;
-      centroidSize[bestSecondaryCentroid] += 1;
-      primaryDocCentroids[docID] = bestCentroid;
-      secondaryDocCentroids[docID] = bestSecondaryCentroid;
-    }
-    if (normalizeCentroids) {
-      for (float[] centroid : centroids) {
-        VectorUtil.l2normalize(centroid, false);
+      if (score < minDist) {
+        bestSecondaryCentroid = centroidOrdinal;
+        minDist = score;
       }
     }
-    assert Arrays.stream(centroidSize).sum() == vectors.size();
+    if (bestSecondaryCentroid != -1) {
+      clusters[bestSecondaryCentroid].add(docId);
+    }
   }
 
   // TODO unify with OSQ format
