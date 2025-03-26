@@ -414,7 +414,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
         }
       }
     }
-    in.seek((length + 14) * BULK_SIZE);
+    in.seek(offset + 14L * BULK_SIZE);
   }
 
   private void score256Bulk(
@@ -495,6 +495,6 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
         }
       }
     }
-    in.seek((length + 14) * BULK_SIZE);
+    in.seek(offset + 14L * BULK_SIZE);
   }
 }

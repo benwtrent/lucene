@@ -79,8 +79,8 @@ public class OSQVectorsScorer {
 
   /**
    * compute the quantize distance between the provided quantized query and the quantized vectors
-   * that are read from the wrapped {@link IndexInput}. The number of  quantized vectors to read
-   * is determined by {code count} and the results are stored in the provided {@code scores} array.
+   * that are read from the wrapped {@link IndexInput}. The number of quantized vectors to read is
+   * determined by {code count} and the results are stored in the provided {@code scores} array.
    */
   public void quantizeScoreBulk(byte[] q, int count, float[] scores) throws IOException {
     for (int i = 0; i < count; i++) {

@@ -52,8 +52,12 @@ public class TestOSQVectorsScorer extends BaseVectorizationTestCase {
     final int length = OptimizedScalarQuantizer.discretize(dimensions, 64) / 8;
     final int numVectors = OSQVectorsScorer.BULK_SIZE * random().nextInt(1, 10);
     final byte[] vector = new byte[length + 14];
+    int padding = random().nextInt(100);
     try (Directory dir = new MMapDirectory(createTempDir())) {
       try (IndexOutput out = dir.createOutput("testScore.bin", IOContext.DEFAULT)) {
+        for (int i = 0; i < padding; i++) {
+          out.writeByte((byte) random().nextInt());
+        }
         for (int i = 0; i < numVectors; i++) {
           random().nextBytes(vector);
           out.writeBytes(vector, 0, length + 14);
@@ -72,7 +76,8 @@ public class TestOSQVectorsScorer extends BaseVectorizationTestCase {
       final float[] scores2 = new float[OSQVectorsScorer.BULK_SIZE];
       for (VectorSimilarityFunction similarityFunction : VectorSimilarityFunction.values()) {
         try (IndexInput in = dir.openInput("testScore.bin", IOContext.DEFAULT)) {
-          assertEquals(in.length(), numVectors * (length + 14));
+          in.seek(padding);
+          assertEquals(in.length(), padding + (long) numVectors * (length + 14));
           // Work on a slice that has just the right number of bytes to make the test fail with an
           // index-out-of-bounds in case the implementation reads more than the allowed number of
           // padding bytes.
@@ -87,8 +92,11 @@ public class TestOSQVectorsScorer extends BaseVectorizationTestCase {
             defaultScorer.scoreBulk(query, result, similarityFunction, centroidDp, scores1);
             panamaScorer.scoreBulk(query, result, similarityFunction, centroidDp, scores2);
             assertArrayEquals(scores1, scores2, 1e-2f);
-            assertEquals(OSQVectorsScorer.BULK_SIZE * (length + 14), slice.getFilePointer());
-            assertEquals(OSQVectorsScorer.BULK_SIZE * (length + 14), in.getFilePointer());
+            assertEquals(
+                ((long) (OSQVectorsScorer.BULK_SIZE) * (length + 14)), slice.getFilePointer());
+            assertEquals(
+                padding + ((long) (i + OSQVectorsScorer.BULK_SIZE) * (length + 14)),
+                in.getFilePointer());
           }
         }
       }
