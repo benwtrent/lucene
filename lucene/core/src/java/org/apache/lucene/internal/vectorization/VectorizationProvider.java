@@ -126,7 +126,7 @@ public abstract class VectorizationProvider {
   public abstract PostingDecodingUtil newPostingDecodingUtil(IndexInput input) throws IOException;
 
   /** Create a new {@link OSQVectorsScorer} for the given {@link IndexInput}. */
-  public abstract OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int length)
+  public abstract OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int dimension)
       throws IOException;
 
   // *** Lookup mechanism: ***

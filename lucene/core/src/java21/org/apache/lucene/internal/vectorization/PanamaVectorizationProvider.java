@@ -99,14 +99,14 @@ final class PanamaVectorizationProvider extends VectorizationProvider {
   }
 
   @Override
-  public OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int length) throws IOException {
+  public OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int dimensions) throws IOException {
     if (PanamaVectorConstants.HAS_FAST_INTEGER_VECTORS
         && input instanceof MemorySegmentAccessInput msai) {
       MemorySegment ms = msai.segmentSliceOrNull(0, input.length());
       if (ms != null) {
-        return new MemorySegmentOSQVectorsScorer(input, length, ms);
+        return new MemorySegmentOSQVectorsScorer(input, dimensions, ms);
       }
     }
-    return new OSQVectorsScorer(input, length);
+    return new OSQVectorsScorer(input, dimensions);
   }
 }

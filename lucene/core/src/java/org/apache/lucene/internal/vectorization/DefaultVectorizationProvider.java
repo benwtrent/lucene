@@ -46,7 +46,7 @@ final class DefaultVectorizationProvider extends VectorizationProvider {
   }
 
   @Override
-  public OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int length) {
-    return new OSQVectorsScorer(input, length);
+  public OSQVectorsScorer newOSQVectorsScorer(IndexInput input, int dimensions) {
+    return new OSQVectorsScorer(input, dimensions);
   }
 }

@@ -192,38 +192,6 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     }
   }
 
-  static float quantizedScore(
-      float qcDist,
-      OptimizedScalarQuantizer.QuantizationResult queryCorrections,
-      int dims,
-      float[] targetCorrections,
-      int targetComponentSum,
-      float centroidDp,
-      VectorSimilarityFunction similarityFunction) {
-    float ax = targetCorrections[0];
-    // Here we assume `lx` is simply bit vectors, so the scaling isn't necessary
-    float lx = targetCorrections[1] - ax;
-    float ay = queryCorrections.lowerInterval();
-    float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
-    float y1 = queryCorrections.quantizedComponentSum();
-    float score =
-        ax * ay * dims + ay * lx * (float) targetComponentSum + ax * ly * y1 + lx * ly * qcDist;
-    // For euclidean, we need to invert the score and apply the additional correction, which is
-    // assumed to be the squared l2norm of the centroid centered vectors.
-    if (similarityFunction == EUCLIDEAN) {
-      score = queryCorrections.additionalCorrection() + targetCorrections[2] - 2 * score;
-      return Math.max(1 / (1f + score), 0);
-    } else {
-      // For cosine and max inner product, we need to apply the additional correction, which is
-      // assumed to be the non-centered dot-product between the vector and the centroid
-      score += queryCorrections.additionalCorrection() + targetCorrections[2] - centroidDp;
-      if (similarityFunction == MAXIMUM_INNER_PRODUCT) {
-        return VectorUtil.scaleMaxInnerProductScore(score);
-      }
-      return Math.max((1f + score) / 2f, 0);
-    }
-  }
-
   static class OffHeapCentroidFloatVectorValues extends FloatVectorValues {
     private final int numCentroids;
     private final IndexInput input;
@@ -336,8 +304,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       prefixSum(docIdsScratch, vectors);
       slicePos = postingsSlice.getFilePointer();
       osqVectorsScorer =
-          VECTORIZATION_PROVIDER.newOSQVectorsScorer(
-              postingsSlice, quantizedQueryScratch.length / 4);
+          VECTORIZATION_PROVIDER.newOSQVectorsScorer(postingsSlice, fieldInfo.getVectorDimension());
       pos = -1;
     }
 
@@ -384,17 +351,18 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         quantized = true;
       }
       postingsSlice.seek(slicePos + pos * quantizedByteLength);
-      final float qcDist = osqVectorsScorer.int4BitDotProduct(quantizedQueryScratch);
+      final float qcDist = osqVectorsScorer.quantizeScore(quantizedQueryScratch);
       postingsSlice.readFloats(correctiveValues, 0, correctiveValues.length);
       final int quantizedComponentSum = Short.toUnsignedInt(postingsSlice.readShort());
-      return quantizedScore(
-          qcDist,
+      return osqVectorsScorer.score(
           queryCorrections,
-          fieldInfo.getVectorDimension(),
-          correctiveValues,
-          quantizedComponentSum,
+          fieldInfo.getVectorSimilarityFunction(),
           centroidDp,
-          fieldInfo.getVectorSimilarityFunction());
+          correctiveValues[0],
+          correctiveValues[1],
+          quantizedComponentSum,
+          correctiveValues[2],
+          qcDist);
     }
   }
 }
