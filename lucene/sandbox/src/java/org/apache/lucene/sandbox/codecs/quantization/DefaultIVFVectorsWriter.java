@@ -18,8 +18,15 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.Collections;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.LinkedList;
 import org.apache.lucene.codecs.hnsw.FlatVectorsWriter;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FloatVectorValues;
@@ -199,6 +206,234 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     return new OffHeapCentroidAssignmentScorer(centroidsInput, numCentroids, fieldInfo);
   }
 
+//
+//  @Override
+//  protected int calculateAndWriteCentroids(
+//    FieldInfo fieldInfo,
+//    FloatVectorValues floatVectorValues,
+//    IndexOutput temporaryCentroidOutput,
+//    MergeState mergeState,
+//    float[] globalCentroid)
+//    throws IOException {
+//    if (floatVectorValues.size() == 0) {
+//      return 0;
+//    }
+//    int maxNumClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
+//    int desiredClusters =
+//      (int)
+//        Math.max(
+//          maxNumClusters / 16.0,
+//          Math.min(Math.sqrt(floatVectorValues.size()), maxNumClusters));
+//    // init centroids from merge state
+//    List<FloatVectorValues> centroidList = new ArrayList<>();
+//    for (var reader : mergeState.knnVectorsReaders) {
+//      IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(reader, fieldInfo.name);
+//      if (ivfVectorsReader == null) {
+//        continue;
+//      }
+//      centroidList.add(ivfVectorsReader.getCentroids(fieldInfo));
+//    }
+//    FloatVectorValues allPreviousCentroids = new FloatVectorValuesConcat(centroidList);
+//    float[][] initCentroids = null;
+//    if (allPreviousCentroids.size() < desiredClusters / 2) {
+//      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+//        mergeState.infoStream.message(
+//          IVF_VECTOR_COMPONENT,
+//          "Not enough centroids: "
+//            + allPreviousCentroids.size()
+//            + " to bootstrap clustering for desired: "
+//            + desiredClusters);
+//      }
+//      // build the lists
+//    } else if (allPreviousCentroids.size() > desiredClusters) {
+//      long nanoTime = System.nanoTime();
+//      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+//        mergeState.infoStream.message(
+//          IVF_VECTOR_COMPONENT,
+//          "have centroids: " + allPreviousCentroids.size() + "for desired: " + desiredClusters);
+//      }
+//      KMeans kMeans =
+//        new KMeans(
+//          allPreviousCentroids,
+//          desiredClusters,
+//          new Random(42),
+//          KMeans.KmeansInitializationMethod.PLUS_PLUS,
+//          null,
+//          1,
+//          5);
+//      initCentroids = kMeans.computeCentroids(false);
+//      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+//        mergeState.infoStream.message(
+//          IVF_VECTOR_COMPONENT,
+//          "initCentroids: "
+//            + (initCentroids == null ? 0 : initCentroids.length)
+//            + " time ms: "
+//            + (System.nanoTime() - nanoTime) / 1000000.0);
+//      }
+//    }
+//    // TODO do more optimized assignment
+//    long nanoTime = System.nanoTime();
+//    final KMeans.Results kMeans =
+//      KMeans.centroid(
+//        floatVectorValues,
+//        desiredClusters,
+//        false,
+//        42L,
+//        KMeans.KmeansInitializationMethod.PLUS_PLUS,
+//        initCentroids,
+//        fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
+//        initCentroids == null ? DEFAULT_RESTARTS : 1,
+//        initCentroids == null ? DEFAULT_ITRS : 5,
+//        desiredClusters * 64);
+//    if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+//      mergeState.infoStream.message(
+//        IVF_VECTOR_COMPONENT, "KMeans time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
+//    }
+//    float[][] centroids = kMeans.centroids();
+//    // write them
+//    OptimizedScalarQuantizer osq =
+//      new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+//    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
+//    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
+//    for (float[] centroid : centroids) {
+//      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
+//      OptimizedScalarQuantizer.QuantizationResult result =
+//        osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+//      IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
+//    }
+//    final ByteBuffer buffer =
+//      ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
+//        .order(ByteOrder.LITTLE_ENDIAN);
+//    for (float[] centroid : centroids) {
+//      buffer.asFloatBuffer().put(centroid);
+//      temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
+//    }
+//    return centroids.length;
+//  }
+
+  // FIXME: write a utility that compares the clusters this generates with an ideal set of clusters after running kmeans brute force
+
+  record FloatCentroidPair(
+    float[] centroid1,
+    float[] centroid2
+  )
+  {}
+
+  record SegmentCentroid(
+    int segment,
+    int centroid
+  ){}
+
+  record CentroidPair(
+    SegmentCentroid baseSc,
+    SegmentCentroid mergedSc,
+    int vectorCount
+  ){}
+
+//  @Override
+  protected int calculateAndWriteCentroidsOld(
+    FieldInfo fieldInfo,
+    FloatVectorValues floatVectorValues,
+    IndexOutput temporaryCentroidOutput,
+    MergeState mergeState,
+    float[] globalCentroid)
+    throws IOException {
+    if (floatVectorValues.size() == 0) {
+      return 0;
+    }
+    int maxNumClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
+    int desiredClusters =
+      (int)
+        Math.max(
+          maxNumClusters / 16.0,
+          Math.min(Math.sqrt(floatVectorValues.size()), maxNumClusters));
+    // init centroids from merge state
+    List<FloatVectorValues> centroidList = new ArrayList<>();
+    for (var reader : mergeState.knnVectorsReaders) {
+      IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(reader, fieldInfo.name);
+      if (ivfVectorsReader == null) {
+        continue;
+      }
+      centroidList.add(ivfVectorsReader.getCentroids(fieldInfo));
+    }
+    FloatVectorValues allPreviousCentroids = new FloatVectorValuesConcat(centroidList);
+    float[][] initCentroids = null;
+    if (allPreviousCentroids.size() < desiredClusters / 2) {
+      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+        mergeState.infoStream.message(
+          IVF_VECTOR_COMPONENT,
+          "Not enough centroids: "
+            + allPreviousCentroids.size()
+            + " to bootstrap clustering for desired: "
+            + desiredClusters);
+      }
+      // build the lists
+    } else if (allPreviousCentroids.size() > desiredClusters) {
+      long nanoTime = System.nanoTime();
+      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+        mergeState.infoStream.message(
+          IVF_VECTOR_COMPONENT,
+          "have centroids: " + allPreviousCentroids.size() + "for desired: " + desiredClusters);
+      }
+      KMeans kMeans =
+        new KMeans(
+          allPreviousCentroids,
+          desiredClusters,
+          new Random(42),
+          KMeans.KmeansInitializationMethod.PLUS_PLUS,
+          null,
+          1,
+          5);
+      initCentroids = kMeans.computeCentroids(false);
+      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+        mergeState.infoStream.message(
+          IVF_VECTOR_COMPONENT,
+          "initCentroids: "
+            + (initCentroids == null ? 0 : initCentroids.length)
+            + " time ms: "
+            + (System.nanoTime() - nanoTime) / 1000000.0);
+      }
+    }
+    // TODO do more optimized assignment
+    long nanoTime = System.nanoTime();
+    final KMeans.Results kMeans =
+      KMeans.cluster(
+        floatVectorValues,
+        desiredClusters,
+        false,
+        42L,
+        KMeans.KmeansInitializationMethod.PLUS_PLUS,
+        initCentroids,
+        fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
+        initCentroids == null ? DEFAULT_RESTARTS : 1,
+        initCentroids == null ? DEFAULT_ITRS : 5,
+        desiredClusters * 64);
+    if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+      mergeState.infoStream.message(
+        IVF_VECTOR_COMPONENT, "KMeans time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
+    }
+    float[][] centroids = kMeans.centroids();
+    // write them
+    OptimizedScalarQuantizer osq =
+      new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
+    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
+    for (float[] centroid : centroids) {
+      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
+      OptimizedScalarQuantizer.QuantizationResult result =
+        osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+      IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
+    }
+    final ByteBuffer buffer =
+      ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
+        .order(ByteOrder.LITTLE_ENDIAN);
+    for (float[] centroid : centroids) {
+      buffer.asFloatBuffer().put(centroid);
+      temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
+    }
+    return centroids.length;
+  }
+
   @Override
   protected int calculateAndWriteCentroids(
       FieldInfo fieldInfo,
@@ -218,52 +453,263 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
                 Math.min(Math.sqrt(floatVectorValues.size()), maxNumClusters));
     // init centroids from merge state
     List<FloatVectorValues> centroidList = new ArrayList<>();
+
+    record CentroidCount(
+      int centroidCount,
+      int segmentIndex
+    ){}
+
+    List<CentroidCount> centroidCountInSegment = new ArrayList<>();
+    Map<SegmentCentroid, Integer> centroidsVectorCount = new HashMap<>();
+    int segmentCount = 0;  // FIXME: change this name to segemntIndex if not using elsewhere
     for (var reader : mergeState.knnVectorsReaders) {
       IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(reader, fieldInfo.name);
       if (ivfVectorsReader == null) {
         continue;
       }
-      centroidList.add(ivfVectorsReader.getCentroids(fieldInfo));
+
+      FloatVectorValues centroid = ivfVectorsReader.getCentroids(fieldInfo);
+      centroidList.add(centroid);
+      System.out.println("== check z:" + segmentCount);
+      centroidCountInSegment.add(new CentroidCount(centroid.size(), segmentCount));
+
+      //create a map of the sizes of the vectors attached to this centroid
+      for (int i = 0; i < centroid.size(); i++) {
+        int count = ivfVectorsReader.centroidSize(fieldInfo.name, i);
+        centroidsVectorCount.put(new SegmentCentroid(segmentCount, i), count);
+      }
+
+      segmentCount++;
     }
-    FloatVectorValues allPreviousCentroids = new FloatVectorValuesConcat(centroidList);
-    float[][] initCentroids = null;
-    if (allPreviousCentroids.size() < desiredClusters / 2) {
-      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
-        mergeState.infoStream.message(
-            IVF_VECTOR_COMPONENT,
-            "Not enough centroids: "
-                + allPreviousCentroids.size()
-                + " to bootstrap clustering for desired: "
-                + desiredClusters);
+
+    Map<Integer, List<SegmentCentroid>> priorCentroidLookup = new HashMap<>();
+    Map<Integer, Integer> mergedCentroidsTotalVectorCount = new HashMap<>();
+
+    // merge clusters in the size order
+    centroidCountInSegment.sort((i, j) -> i.centroidCount < j.centroidCount ? 1 : -1);
+    int[] orderedSegments = centroidCountInSegment.stream().map(i -> i.segmentIndex).mapToInt(Integer::intValue).toArray();
+
+    System.out.println("== check 0");
+    System.out.println(centroidList.size());
+    System.out.println(Arrays.toString(orderedSegments));
+    System.out.println(centroidCountInSegment);
+    System.out.println(centroidsVectorCount.entrySet());
+
+    FloatVectorValues baseSegment = centroidList.get(orderedSegments[0]);
+
+    for(int j = 0; j < baseSegment.size(); j++) {
+      priorCentroidLookup.put(j, new ArrayList<>());
+      mergedCentroidsTotalVectorCount.put(j, centroidsVectorCount.get(new SegmentCentroid(orderedSegments[0], j)));
+    }
+
+    for(int i = 0; i < orderedSegments.length; i++) {
+        // between the largeset and next largest segments find pairwise the clusters closest to one another
+        FloatVectorValues mergingSegment = centroidList.get(orderedSegments[i]);
+        List<Integer> candidateCentroids = IntStream.range(0, mergingSegment.size()).boxed().collect(Collectors.toCollection(LinkedList::new));
+        for(int j = 0; j < baseSegment.size(); j++) {
+          float[] baseCentroid = baseSegment.vectorValue(j);
+
+          int closest = 0;
+
+          // check for if we have run out of candidates to merge with and should just keep this current cluster by itself
+          if(!candidateCentroids.isEmpty()) {
+            // FIXME: need to respect similarity function?? .. don't think so?
+            float closestDistance = VectorUtil.squareDistance(baseCentroid, mergingSegment.vectorValue(candidateCentroids.get(0)));
+            for (int k = 1; k < candidateCentroids.size(); k++) {
+              float[] mergingCentroid = mergingSegment.vectorValue(k);
+
+              // FIXME: wags refine this
+              // FIXME: compute distances between all candidates in the segment and pick the median or min distance and that's the threshold
+              // FIXME: probably should be some max distance here we are willing to merge centroids and otherwise we treat them both as lone centroids? (essentially just appending them)
+              float d = VectorUtil.squareDistance(baseCentroid, mergingCentroid);
+              if (d < closestDistance) {
+                closestDistance = d;
+                closest = k;
+              }
+            }
+
+            // remove the centroid from consideration at this point
+            candidateCentroids.remove(closest);
+
+            // store a mapping of pairs of cluster to their new candidate cluster
+            SegmentCentroid merging = new SegmentCentroid(orderedSegments[i], closest);
+            priorCentroidLookup.get(j).add(merging);
+            mergedCentroidsTotalVectorCount.compute(j, (_, v) -> v + centroidsVectorCount.get(merging));
+          }
+        }
+    }
+
+    // break apart the clusters that are the largest in size first
+    // in size order for each cluster find the center of mass of each of cluster (avg of the original centroids or avg of vector values?) and then split that newly combined centroid into two nearby centroids
+    //  for the two new clusters cut the associated size in half and then repeat this process until all the desiredClusters exist
+    Map<Integer, FloatCentroidPair> splitCentroids = new HashMap<>();
+
+    // we'll use this later to know if we need to finally merge centroids that were untouched
+    Map<Integer, Boolean> isMerged = new HashMap<>();
+    for(int j = 0; j < baseSegment.size(); j++) {
+      isMerged.put(j, false);
+    }
+
+    Map<Integer, float[]> loneCentroids = new HashMap<>();
+
+    // we init with the total number of centroids we plan to merge
+    int totalCentroidsCount = priorCentroidLookup.size();
+    while(totalCentroidsCount < desiredClusters) {
+      // find the largest ones and combine those first
+      // better order these by largest and loop over them once rather than looping over and over again
+      int largest = -1;
+      int baseCentroidIndex = -1;
+      List<SegmentCentroid> largestArrayOfCentroids = null;
+      for(Map.Entry<Integer, List<SegmentCentroid>> entry : priorCentroidLookup.entrySet()) {
+        int vectorCount = mergedCentroidsTotalVectorCount.get(entry.getKey());
+        if(vectorCount > largest) {
+          largest = vectorCount;
+          baseCentroidIndex = entry.getKey();
+          largestArrayOfCentroids = entry.getValue();
+        }
       }
-      // build the lists
-    } else if (allPreviousCentroids.size() > desiredClusters) {
-      long nanoTime = System.nanoTime();
-      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
-        mergeState.infoStream.message(
-            IVF_VECTOR_COMPONENT,
-            "have centroids: " + allPreviousCentroids.size() + "for desired: " + desiredClusters);
+
+      // FIXME: need to handle the case where we didn't hit our desired cluster count by further splitting
+      // this indicates either a bug previously in forming this cluster or a centroid we've set to done and we've completed them all
+      if(largest == 0) {
+        break;
       }
-      KMeans kMeans =
-          new KMeans(
-              allPreviousCentroids,
-              desiredClusters,
-              new Random(42),
-              KMeans.KmeansInitializationMethod.PLUS_PLUS,
-              null,
-              1,
-              5);
-      initCentroids = kMeans.computeCentroids(false);
-      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
-        mergeState.infoStream.message(
-            IVF_VECTOR_COMPONENT,
-            "initCentroids: "
-                + (initCentroids == null ? 0 : initCentroids.length)
-                + " time ms: "
-                + (System.nanoTime() - nanoTime) / 1000000.0);
+
+      // combine all the centroids in the group and them split them out into just two
+      assert largestArrayOfCentroids != null;
+      float[] baseCentroid = baseSegment.vectorValue(baseCentroidIndex);
+
+      if(largestArrayOfCentroids.isEmpty()) {
+        // there were no aligned centroids from the prior step this is a lone centroid from the base segment
+        loneCentroids.put(baseCentroidIndex, baseCentroid);
+        mergedCentroidsTotalVectorCount.put(baseCentroidIndex, 0);
+      } else {
+        float[][] centroidsToCombine = new float[largestArrayOfCentroids.size()][];
+        for (int i = 0; i < largestArrayOfCentroids.size(); i++) {
+          SegmentCentroid sc = largestArrayOfCentroids.get(i);
+          centroidsToCombine[i] = centroidList.get(sc.segment).vectorValue(sc.centroid);
+        }
+
+        // FIXME: wags push up sep branch
+        // FIXME: wags refine this
+        // FIXME: for now we assume the clusters are relatively close in size and therefore we never split an already split cluster again (probably a bad assumption long term)
+        // FIXME: need to account for being able to split them again? ... split their counts in half and then maybe the split centroids will need splitting as well? or could proactively split them until they are smaller than the smallest centroid?
+        // FIXME: round up on this division?
+//      mergedCentroidsTotalVectorCount.put(baseCentroidIndex, largest / 2);
+        mergedCentroidsTotalVectorCount.put(baseCentroidIndex, 0);
+        float[] combinedCentroid = combineCentroids(baseCentroid, centroidsToCombine);
+        FloatCentroidPair splitCentroid = splitCentroid(combinedCentroid);
+        splitCentroids.put(baseCentroidIndex, splitCentroid);
+        isMerged.put(baseCentroidIndex, true);
+
+        // because we merged all the centroids and then split it into 2 we add to our total count
+        totalCentroidsCount += 1;
       }
     }
+
+    for(Map.Entry<Integer, Boolean> entry : isMerged.entrySet()) {
+      if(!entry.getValue()) {
+        float[] baseCentroid = baseSegment.vectorValue(entry.getKey());
+        List<SegmentCentroid> centroids = priorCentroidLookup.get(entry.getKey());
+        float[][] centroidsToCombine = new float[centroids.size()][];
+        for(int i = 0; i < centroids.size(); i++) {
+          SegmentCentroid sc = centroids.get(i);
+          centroidsToCombine[i] = centroidList.get(orderedSegments[sc.segment]).vectorValue(sc.centroid);
+        }
+
+        float[] combinedCentroid = combineCentroids(baseCentroid, centroidsToCombine);
+        loneCentroids.put(entry.getKey(), combinedCentroid);
+      }
+    }
+
+    // compile both lone centroids and merged centroids to get a list of initCentroids at desired size
+    assert totalCentroidsCount == desiredClusters;
+    float[][] initCentroids = new float[totalCentroidsCount][];
+
+    System.out.println("== check 1");
+    System.out.println(priorCentroidLookup.size());
+    System.out.println(desiredClusters);
+    System.out.println(splitCentroids.size());
+    System.out.println(loneCentroids.size());
+    System.out.println(isMerged.size());
+    System.out.println(totalCentroidsCount);
+    System.out.println(baseSegment.size());
+
+    System.out.println("== check 2");
+    System.out.println(initCentroids.length);
+
+    int mergedCount = 0;
+    int initCentroidsIndex = 0;
+    for(int i = 0; i < baseSegment.size(); i++) {
+      // the combined and subsequently split centroids that correspond to the original centroid in the base segment at this location
+      if(isMerged.get(i)) {
+        FloatCentroidPair centroidPair = splitCentroids.get(i);
+        initCentroids[initCentroidsIndex++] = centroidPair.centroid1;
+        initCentroids[initCentroidsIndex++] = centroidPair.centroid2;
+        mergedCount++;
+      } else {
+        initCentroids[initCentroidsIndex++] = loneCentroids.get(i);
+      }
+    }
+
+    System.out.println(mergedCount);
+    System.out.println("== check 3");
+    System.out.println(initCentroidsIndex);
+
+//    for(int i = 0; i < initCentroids.length; i++) {
+//      System.out.print(Arrays.toString(initCentroids[i]));
+//    }
+//    System.out.println();
+
+    // FIXME: need a way to maintain the original mapping ... update KMeans to allow maintaining that mapping
+
+    // FIXME: go update the assignCentroids code to respect that mapping from prior centroid to next centroid (via the scorer?)
+
+//    float[][] initCentroids = null;
+
+    // FIXME: add this back? ... clean this up
+//    FloatVectorValues allPreviousCentroids = new FloatVectorValuesConcat(centroidList);
+//    if (allPreviousCentroids.size() < desiredClusters / 2) {
+//      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+//        mergeState.infoStream.message(
+//            IVF_VECTOR_COMPONENT,
+//            "Not enough centroids: "
+//                + allPreviousCentroids.size()
+//                + " to bootstrap clustering for desired: "
+//                + desiredClusters);
+//      }
+//      // build the lists
+//    } else if (allPreviousCentroids.size() > desiredClusters) {
+//      long nanoTime = System.nanoTime();
+//      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+//        mergeState.infoStream.message(
+//            IVF_VECTOR_COMPONENT,
+//            "have centroids: " + allPreviousCentroids.size() + "for desired: " + desiredClusters);
+//      }
+//      KMeans kMeans =
+//          new KMeans(
+//              allPreviousCentroids,
+//              desiredClusters,
+//              new Random(42),
+//              KMeans.KmeansInitializationMethod.PLUS_PLUS,
+//              null,
+//              1,
+//              5);
+//      initCentroids = kMeans.computeCentroids(false);
+//      if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+//        mergeState.infoStream.message(
+//            IVF_VECTOR_COMPONENT,
+//            "initCentroids: "
+//                + (initCentroids == null ? 0 : initCentroids.length)
+//                + " time ms: "
+//                + (System.nanoTime() - nanoTime) / 1000000.0);
+//      }
+//    }
     // TODO do more optimized assignment
+
+    // FIXME: run a custom version of kmeans that adjusts the centroids that were split related to only the sets of vectors that were previously associated with the prior centroids
+
+    // FIXME: compare this kmeans outcome with a lot of iterations with the outcome of the process detailed above; ideally a large run of kmeans is approximated by the above algorithm
     long nanoTime = System.nanoTime();
     final KMeans.Results kMeans =
         KMeans.cluster(
@@ -301,6 +747,44 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
     }
     return centroids.length;
+  }
+
+  private float[] combineCentroids(float[] baseCentroid, float[][] centroidsToCombine) {
+    if(centroidsToCombine.length == 0) {
+      return baseCentroid;
+    }
+    float[] combinedCentroid = new float[baseCentroid.length];
+    for(int i = 0; i < baseCentroid.length; i++) {
+      combinedCentroid[i] = baseCentroid[i];
+    }
+    for(int i = 0; i < centroidsToCombine.length; i++) {
+      for (int j = 0; j < baseCentroid.length; j++) {
+        combinedCentroid[j] += centroidsToCombine[i][j];
+      }
+    }
+    for(int i = 0; i < baseCentroid.length; i++) {
+      combinedCentroid[i] /= centroidsToCombine.length;
+    }
+    return combinedCentroid;
+  }
+
+  private static final float epsilon = 1f / 1024f;
+
+  private FloatCentroidPair splitCentroid(float[] centroid) {
+    float[] centroid1 = new float[centroid.length];
+    float[] centroid2 = new float[centroid.length];
+
+    for(int i = 0; i < centroid.length; i++) {
+      if (i % 2 == 0) {
+        centroid1[i] *= 1f + epsilon;
+        centroid2[i] *= 1f - epsilon;
+      } else {
+        centroid1[i] *= 1f - epsilon;
+        centroid2[i] *= 1f + epsilon;
+      }
+    }
+
+    return new FloatCentroidPair(centroid1, centroid2);
   }
 
   @Override

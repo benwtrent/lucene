@@ -98,6 +98,12 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
   }
 
+  int centroidSize(String fieldName, int centroidOrdinal) throws IOException {
+    FieldInfo fieldInfo = state.fieldInfos.fieldInfo(fieldName);
+    FieldEntry entry = fields.get(fieldInfo.number);
+    return entry.postingsSlice(ivfClusters, centroidOrdinal).readVInt();
+  }
+
   protected abstract IVFUtils.CentroidQueryScorer getCentroidScorer(
       FieldInfo fieldInfo,
       int numCentroids,
