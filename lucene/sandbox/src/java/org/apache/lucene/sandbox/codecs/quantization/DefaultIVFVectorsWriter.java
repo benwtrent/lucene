@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.PriorityQueue;
+import java.util.Queue;
 import java.util.Random;
 import java.util.Map;
 import java.util.TreeMap;
@@ -313,9 +315,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
   // FIXME: write a utility that compares the clusters this generates with an ideal set of clusters after running kmeans brute force
 
-  record FloatCentroidPair(
-    float[] centroid1,
-    float[] centroid2
+  record FloatCentroidSplits(
+    float[][] centroids
   )
   {}
 
@@ -486,6 +487,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     Map<Integer, Integer> mergedCentroidsTotalVectorCount = new HashMap<>();
 
     // merge clusters in the size order
+    // FIXME: better comparator here
     centroidCountInSegment.sort((i, j) -> i.centroidCount < j.centroidCount ? 1 : -1);
     int[] orderedSegments = centroidCountInSegment.stream().map(i -> i.segmentIndex).mapToInt(Integer::intValue).toArray();
 
@@ -560,7 +562,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     // break apart the clusters that are the largest in size first
     // in size order for each cluster find the center of mass of each of cluster (avg of the original centroids or avg of vector values?) and then split that newly combined centroid into two nearby centroids
     //  for the two new clusters cut the associated size in half and then repeat this process until all the desiredClusters exist
-    Map<Integer, FloatCentroidPair> splitCentroids = new HashMap<>();
+    Map<Integer, FloatCentroidSplits> splitCentroids = new HashMap<>();
 
     // we'll use this later to know if we need to finally merge centroids that were untouched
     Map<Integer, Boolean> isMerged = new HashMap<>();
@@ -570,28 +572,38 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
     Map<Integer, float[]> loneCentroids = new HashMap<>();
 
+    record SegmentCentroidCount(
+      List<SegmentCentroid> segmentCentroids,
+      int baseCentroidIndex,
+      int totalVectorCount,
+      int splitLevel   // the total number of times we have split this centroid
+    ) {}
+
+    // FIXME: better comparator here
+    Queue<SegmentCentroidCount> centroidsToMerge = new PriorityQueue<>(priorCentroidLookup.size(), (sc1, sc2) -> sc1.totalVectorCount > sc2.totalVectorCount? 1 : -1);
+
+    // find the largest ones and combine those first
+    // better order these by largest and loop over them once rather than looping over and over again
+    for(Map.Entry<Integer, List<SegmentCentroid>> entry : priorCentroidLookup.entrySet()) {
+      int vectorCount = mergedCentroidsTotalVectorCount.get(entry.getKey());
+      centroidsToMerge.add(new SegmentCentroidCount(
+        entry.getValue(),
+        entry.getKey(),
+        vectorCount,
+        1
+      ));
+    }
+
     // we init with the total number of centroids we plan to merge
     int totalCentroidsCount = priorCentroidLookup.size();
-    while(totalCentroidsCount < desiredClusters) {
+    while(totalCentroidsCount < desiredClusters && !centroidsToMerge.isEmpty()) {
       // find the largest ones and combine those first
-      // better order these by largest and loop over them once rather than looping over and over again
-      int largest = -1;
-      int baseCentroidIndex = -1;
-      List<SegmentCentroid> largestArrayOfCentroids = null;
-      for(Map.Entry<Integer, List<SegmentCentroid>> entry : priorCentroidLookup.entrySet()) {
-        int vectorCount = mergedCentroidsTotalVectorCount.get(entry.getKey());
-        if(vectorCount > largest) {
-          largest = vectorCount;
-          baseCentroidIndex = entry.getKey();
-          largestArrayOfCentroids = entry.getValue();
-        }
-      }
 
-      // FIXME: need to handle the case where we didn't hit our desired cluster count by further splitting
-      // this indicates either a bug previously in forming this cluster or a centroid we've set to done and we've completed them all
-      if(largest == 0) {
-        break;
-      }
+      SegmentCentroidCount scc = centroidsToMerge.remove();
+      List<SegmentCentroid> largestArrayOfCentroids = scc.segmentCentroids;
+      int baseCentroidIndex = scc.baseCentroidIndex;
+      int largest = scc.totalVectorCount;
+      int splitLevel = scc.splitLevel;
 
       // combine all the centroids in the group and them split them out into just two
       assert largestArrayOfCentroids != null;
@@ -600,26 +612,41 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       if(largestArrayOfCentroids.isEmpty()) {
         // there were no aligned centroids from the prior step this is a lone centroid from the base segment
         loneCentroids.put(baseCentroidIndex, baseCentroid);
-        mergedCentroidsTotalVectorCount.put(baseCentroidIndex, 0);
+        // FIXME: previously we assumed the clusters are relatively close in size and therefore we never split an already split cluster again (probably a bad assumption long term) ... now not sure?
+        // mergedCentroidsTotalVectorCount.put(baseCentroidIndex, 0);
       } else {
+        // FIXME: previously we assumed the clusters are relatively close in size and therefore we never split an already split cluster again (probably a bad assumption long term) ... now not sure?
+        // ... but this effectively causes splitting only once
+        // mergedCentroidsTotalVectorCount.put(baseCentroidIndex, 0);
+
+        // FIXME: need to account for being able to split them again? ... split their counts in half and then maybe the split centroids will need splitting as well? or could proactively split them until they are smaller than the smallest centroid?
+        // FIXME: counts are not entirely accurrate here and that's not a problem because these can be approximate and that's fine; we'll round down here and prioritize splitting other centroids first if we would have otherwise have had equal counts when rounding up
+        //  mergedCentroidsTotalVectorCount.put(baseCentroidIndex, largest / 2);
+
+        // even though this is split for now we keep all the associated vectors with this since there's no reason to prematurely divide now
+        splitLevel++;
+        centroidsToMerge.add(new SegmentCentroidCount(
+          largestArrayOfCentroids,
+          baseCentroidIndex,
+          largest / splitLevel,
+          splitLevel
+        ));
+
         float[][] centroidsToCombine = new float[largestArrayOfCentroids.size()][];
         for (int i = 0; i < largestArrayOfCentroids.size(); i++) {
           SegmentCentroid sc = largestArrayOfCentroids.get(i);
           centroidsToCombine[i] = centroidList.get(sc.segment).vectorValue(sc.centroid);
         }
 
-        // FIXME: wags refine this
-        // FIXME: for now we assume the clusters are relatively close in size and therefore we never split an already split cluster again (probably a bad assumption long term)
-        // FIXME: need to account for being able to split them again? ... split their counts in half and then maybe the split centroids will need splitting as well? or could proactively split them until they are smaller than the smallest centroid?
-        // FIXME: round up on this division?
-//      mergedCentroidsTotalVectorCount.put(baseCentroidIndex, largest / 2);
-        mergedCentroidsTotalVectorCount.put(baseCentroidIndex, 0);
+        // FIXME: try not splitting at all and just keeping the large centroid (disable the kmeans pass below as well?)
+        // FIXME: pull this out and only do a combine and split once with the last split level (measure how often this occurs)
         float[] combinedCentroid = combineCentroids(baseCentroid, centroidsToCombine);
-        FloatCentroidPair splitCentroid = splitCentroid(combinedCentroid);
+        System.out.println("=== split level: " + splitLevel);
+        FloatCentroidSplits splitCentroid = splitCentroid(combinedCentroid, splitLevel);
         splitCentroids.put(baseCentroidIndex, splitCentroid);
         isMerged.put(baseCentroidIndex, true);
 
-        // because we merged all the centroids and then split it into 2 we add to our total count
+        // because we merged all the centroids and then split it we add to our total count
         totalCentroidsCount += 1;
       }
     }
@@ -660,9 +687,10 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     for(int i = 0; i < baseSegment.size(); i++) {
       // the combined and subsequently split centroids that correspond to the original centroid in the base segment at this location
       if(isMerged.get(i)) {
-        FloatCentroidPair centroidPair = splitCentroids.get(i);
-        initCentroids[initCentroidsIndex++] = centroidPair.centroid1;
-        initCentroids[initCentroidsIndex++] = centroidPair.centroid2;
+        FloatCentroidSplits centroidPair = splitCentroids.get(i);
+        for(int j = 0; j < centroidPair.centroids.length; j++) {
+          initCentroids[initCentroidsIndex++] = centroidPair.centroids[j];
+        }
         mergedCount++;
       } else {
         initCentroids[initCentroidsIndex++] = loneCentroids.get(i);
@@ -767,6 +795,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   private float[] combineCentroids(float[] baseCentroid, float[][] centroidsToCombine) {
+    // FIXME: make this a weight avg based on the total number of vectors associated with each centroid
     if(centroidsToCombine.length == 0) {
       return baseCentroid;
     }
@@ -787,21 +816,24 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
   private static final float epsilon = 1f / 1024f;
 
-  private FloatCentroidPair splitCentroid(float[] centroid) {
-    float[] centroid1 = new float[centroid.length];
-    float[] centroid2 = new float[centroid.length];
+  private FloatCentroidSplits splitCentroid(float[] centroid, int splitLevel) {
+    float[][] splitCentroids = new float[splitLevel][centroid.length];
+
+    for(int i = 0; i < splitCentroids.length; i++) {
+      System.arraycopy(centroid, 0, splitCentroids[i], 0, splitCentroids.length);
+    }
 
     for(int i = 0; i < centroid.length; i++) {
-      if (i % 2 == 0) {
-        centroid1[i] *= 1f + epsilon;
-        centroid2[i] *= 1f - epsilon;
-      } else {
-        centroid1[i] *= 1f - epsilon;
-        centroid2[i] *= 1f + epsilon;
+      for(int j = 0; j < splitCentroids.length; j++) {
+        if(j != i % splitLevel) {
+          splitCentroids[j][i] *= 1f - epsilon;
+        } else {
+          splitCentroids[j][i] *= 1f + epsilon;
+        }
       }
     }
 
-    return new FloatCentroidPair(centroid1, centroid2);
+    return new FloatCentroidSplits(splitCentroids);
   }
 
   @Override
