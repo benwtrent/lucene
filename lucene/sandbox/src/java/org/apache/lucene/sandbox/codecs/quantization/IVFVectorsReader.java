@@ -24,7 +24,6 @@ import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.internal.hppc.IntObjectHashMap;
 import org.apache.lucene.sandbox.search.knn.IVFKnnSearchStrategy;
-import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.DataInput;
@@ -115,7 +114,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       return null;
     }
     return getCentroids(
-        entry.centroidSlice(ivfCentroids), entry.postingListOffsetsAndLengths.length, fieldInfo);
+        entry.centroidSlice(ivfCentroids), entry.postingListOffsets.length, fieldInfo);
   }
 
   private static IndexInput openDataInput(
@@ -174,9 +173,9 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     final long centroidOffset = input.readLong();
     final long centroidLength = input.readLong();
     final int numPostingLists = input.readVInt();
-    final long[][] postingListOffsets = new long[numPostingLists][];
+    final long[] postingListOffsets = new long[numPostingLists];
     for (int i = 0; i < numPostingLists; i++) {
-      postingListOffsets[i] = new long[] {input.readLong(), input.readLong()};
+      postingListOffsets[i] = input.readLong();
     }
     final float[] globalCentroid = new float[info.getVectorDimension()];
     float globalCentroidDp = 0;
@@ -274,7 +273,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     IVFUtils.CentroidQueryScorer centroidQueryScorer =
         getCentroidScorer(
             fieldInfo,
-            entry.postingListOffsetsAndLengths.length,
+            entry.postingListOffsets.length,
             entry.centroidSlice(ivfCentroids),
             target,
             ivfClusters);
@@ -284,7 +283,8 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
     final NeighborQueue centroidQueue =
         scorePostingLists(fieldInfo, knnCollector, centroidQueryScorer, nProbe);
-    IVFUtils.PostingsScorer scorer = getPostingScorer(fieldInfo, ivfClusters, target, needsScoring);
+    IVFUtils.PostingVisitor scorer =
+        getPostingVisitor(fieldInfo, ivfClusters, target, needsScoring);
     int centroidsVisited = 0;
     long expectedDocs = 0;
     long actualDocs = 0;
@@ -294,12 +294,12 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       // todo do we actually need to know the score???
       int centroidOrdinal = centroidQueue.pop();
       // todo do we need direct access to the raw centroid???
-      scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
-      expectedDocs += scorer.cost();
-      while (scorer.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
-        ++actualDocs;
-        knnCollector.incVisitedCount(1);
-        knnCollector.collect(scorer.docID(), scorer.score());
+      expectedDocs +=
+          scorer.resetPostingsScorer(
+              centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
+      actualDocs += scorer.visit(knnCollector);
+      if (knnCollector.earlyTerminated()) {
+        return;
       }
     }
     // if we are using a filtered search, we need to account for the documents that were filtered
@@ -309,10 +309,9 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     while (acceptDocs != null && centroidQueue.size() > 0 && actualDocs < expectedScored) {
       int centroidOrdinal = centroidQueue.pop();
       scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
-      while (scorer.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
-        actualDocs++;
-        knnCollector.incVisitedCount(1);
-        knnCollector.collect(scorer.docID(), scorer.score());
+      actualDocs += scorer.visit(knnCollector);
+      if (knnCollector.earlyTerminated()) {
+        return;
       }
     }
   }
@@ -349,20 +348,21 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       VectorEncoding vectorEncoding,
       long centroidOffset,
       long centroidLength,
-      long[][] postingListOffsetsAndLengths,
+      long[] postingListOffsets,
       float[] globalCentroid,
       float globalCentroidDp) {
     IndexInput centroidSlice(IndexInput centroidFile) throws IOException {
       return centroidFile.slice("centroids", centroidOffset, centroidLength);
     }
 
-    IndexInput postingsSlice(IndexInput postingsFile, int i) throws IOException {
-      return postingsFile.slice(
-          "postings-" + i, postingListOffsetsAndLengths[i][0], postingListOffsetsAndLengths[i][1]);
-    }
+    //    IndexInput postingsSlice(IndexInput postingsFile, int i) throws IOException {
+    //      return postingsFile.slice(
+    //          "postings-" + i, postingListOffsetsAndLengths[i][0],
+    // postingListOffsetsAndLengths[i][1]);
+    //    }
   }
 
-  protected abstract IVFUtils.PostingsScorer getPostingScorer(
+  protected abstract IVFUtils.PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput postingsLists, float[] target, IntPredicate needsScoring)
       throws IOException;
 

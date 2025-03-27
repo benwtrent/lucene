@@ -129,7 +129,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected long[][] buildAndWritePostingsLists(
+  protected long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
       InfoStream infoStream,
       IVFUtils.CentroidAssignmentScorer randomCentroidScorer,
@@ -145,7 +145,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       printClusterQualityStatistics(clusters, infoStream);
     }
     // write the posting lists
-    final long[][] offsetsAndLengths = new long[randomCentroidScorer.size()][];
+    final long[] offsets = new long[randomCentroidScorer.size()];
     OptimizedScalarQuantizer quantizer =
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     BinarizedFloatVectorValues binarizedByteVectorValues =
@@ -156,8 +156,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       binarizedByteVectorValues.centroid = centroid;
       IntArrayList cluster = clusters[i].sort();
       // TODO align???
-      offsetsAndLengths[i] = new long[2];
-      offsetsAndLengths[i][0] = postingsOutput.getFilePointer();
+      offsets[i] = postingsOutput.getFilePointer();
       int size = cluster.size();
       postingsOutput.writeVInt(size);
       postingsOutput.writeInt(Float.floatToIntBits(VectorUtil.dotProduct(centroid, centroid)));
@@ -179,17 +178,24 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       //  to aid with only having to fetch vectors from slower storage when they are required
       //  keeping them in the same file indicates we pull the entire file into cache
       postingsOutput.writeGroupVInts(docIdBuffer, size);
-      for (int cidx = 0; cidx < cluster.size(); cidx++) {
-        int ord = cluster.get(cidx);
-        // write vector
-        byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
-        OptimizedScalarQuantizer.QuantizationResult corrections =
-            binarizedByteVectorValues.getCorrectiveTerms(ord);
-        IVFUtils.writeQuantizedValue(postingsOutput, binaryValue, corrections);
-      }
-      offsetsAndLengths[i][1] = postingsOutput.getFilePointer() - offsetsAndLengths[i][0];
+      writePostingList(cluster, postingsOutput, binarizedByteVectorValues);
     }
-    return offsetsAndLengths;
+    return offsets;
+  }
+
+  private void writePostingList(
+      IntArrayList cluster,
+      IndexOutput postingsOutput,
+      BinarizedFloatVectorValues binarizedByteVectorValues)
+      throws IOException {
+    for (int cidx = 0; cidx < cluster.size(); cidx++) {
+      int ord = cluster.get(cidx);
+      // write vector
+      byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
+      OptimizedScalarQuantizer.QuantizationResult corrections =
+          binarizedByteVectorValues.getCorrectiveTerms(ord);
+      IVFUtils.writeQuantizedValue(postingsOutput, binaryValue, corrections);
+    }
   }
 
   @Override
@@ -304,7 +310,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected long[][] buildAndWritePostingsLists(
+  protected long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
       IVFUtils.CentroidAssignmentScorer centroidAssignmentScorer,
       FloatVectorValues floatVectorValues,
@@ -328,7 +334,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       printClusterQualityStatistics(clusters, mergeState.infoStream);
     }
     // write the posting lists
-    final long[][] offsets = new long[centroidAssignmentScorer.size()][];
+    final long[] offsets = new long[centroidAssignmentScorer.size()];
     OptimizedScalarQuantizer quantizer =
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     BinarizedFloatVectorValues binarizedByteVectorValues =
@@ -338,9 +344,9 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       float[] centroid = centroidAssignmentScorer.centroid(i);
       binarizedByteVectorValues.centroid = centroid;
       IntArrayList cluster = clusters[i].sort();
-      offsets[i] = new long[2];
+      ;
       // TODO align???
-      offsets[i][0] = postingsOutput.getFilePointer();
+      offsets[i] = postingsOutput.getFilePointer();
       int size = cluster.size();
       postingsOutput.writeVInt(size);
       postingsOutput.writeInt(Float.floatToIntBits(VectorUtil.dotProduct(centroid, centroid)));
@@ -357,15 +363,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       //  to aid with only having to fetch vectors from slower storage when they are required
       //  keeping them in the same file indicates we pull the entire file into cache
       postingsOutput.writeGroupVInts(docIdBuffer, size);
-      for (int cidx = 0; cidx < cluster.size(); cidx++) {
-        int ord = cluster.get(cidx);
-        // write vector
-        IVFUtils.writeQuantizedValue(
-            postingsOutput,
-            binarizedByteVectorValues.vectorValue(ord),
-            binarizedByteVectorValues.getCorrectiveTerms(ord));
-      }
-      offsets[i][1] = postingsOutput.getFilePointer() - offsets[i][0];
+      writePostingList(cluster, postingsOutput, binarizedByteVectorValues);
     }
     return offsets;
   }

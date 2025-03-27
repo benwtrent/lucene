@@ -153,10 +153,11 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   @Override
-  protected IVFUtils.PostingsScorer getPostingScorer(
-      FieldInfo fieldInfo, IndexInput indexInput, float[] target, IntPredicate needsScoring) {
+  protected IVFUtils.PostingVisitor getPostingVisitor(
+      FieldInfo fieldInfo, IndexInput indexInput, float[] target, IntPredicate needsScoring)
+      throws IOException {
     FieldEntry entry = fields.get(fieldInfo.number);
-    return new MemorySegmentPostingsScorer(target, indexInput, entry, fieldInfo, needsScoring);
+    return new MemorySegmentPostingsVisitor(target, indexInput, entry, fieldInfo, needsScoring);
   }
 
   // TODO can we do this in off-heap blocks?
@@ -246,21 +247,20 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     }
   }
 
-  private static class MemorySegmentPostingsScorer extends IVFUtils.PostingsScorer {
+  private static class MemorySegmentPostingsVisitor extends IVFUtils.PostingVisitor {
     final long quantizedByteLength;
     final IndexInput indexInput;
     final float[] target;
     final FieldEntry entry;
     final FieldInfo fieldInfo;
     final IntPredicate needsScoring;
+    private final OSQVectorsScorer osqVectorsScorer;
 
     int[] docIdsScratch = new int[0];
-    IndexInput postingsSlice;
     int vectors;
     boolean quantized = false;
     float centroidDp;
     float[] centroid;
-    int pos;
     long slicePos;
     OptimizedScalarQuantizer.QuantizationResult queryCorrections;
 
@@ -269,14 +269,14 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     final byte[] quantizedQueryScratch;
     final OptimizedScalarQuantizer quantizer;
     final float[] correctiveValues = new float[3];
-    private OSQVectorsScorer osqVectorsScorer;
 
-    MemorySegmentPostingsScorer(
+    MemorySegmentPostingsVisitor(
         float[] target,
         IndexInput indexInput,
         FieldEntry entry,
         FieldInfo fieldInfo,
-        IntPredicate needsScoring) {
+        IntPredicate needsScoring)
+        throws IOException {
       this.target = target;
       this.indexInput = indexInput;
       this.entry = entry;
@@ -289,57 +289,60 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       quantizedQueryScratch = new byte[QUERY_BITS * discretizedDimensions / 8];
       quantizedByteLength = discretizedDimensions / 8 + (Float.BYTES * 3) + Short.BYTES;
       quantizer = new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+      osqVectorsScorer =
+          VECTORIZATION_PROVIDER.newOSQVectorsScorer(indexInput, fieldInfo.getVectorDimension());
     }
 
     @Override
-    public void resetPostingsScorer(int centroidOrdinal, float[] centroid) throws IOException {
+    public int resetPostingsScorer(int centroidOrdinal, float[] centroid) throws IOException {
       quantized = false;
-      postingsSlice = entry.postingsSlice(indexInput, centroidOrdinal);
-      vectors = postingsSlice.readVInt();
-      centroidDp = Float.intBitsToFloat(postingsSlice.readInt());
+      indexInput.seek(entry.postingListOffsets()[centroidOrdinal]);
+      vectors = indexInput.readVInt();
+      centroidDp = Float.intBitsToFloat(indexInput.readInt());
       this.centroid = centroid;
       // read the doc ids
       docIdsScratch = vectors > docIdsScratch.length ? new int[vectors] : docIdsScratch;
-      GroupVIntUtil.readGroupVInts(postingsSlice, docIdsScratch, vectors);
+      GroupVIntUtil.readGroupVInts(indexInput, docIdsScratch, vectors);
       prefixSum(docIdsScratch, vectors);
-      slicePos = postingsSlice.getFilePointer();
-      osqVectorsScorer =
-          VECTORIZATION_PROVIDER.newOSQVectorsScorer(postingsSlice, fieldInfo.getVectorDimension());
-      pos = -1;
-    }
-
-    @Override
-    public int docID() {
-      return docIdsScratch[pos];
-    }
-
-    @Override
-    public int nextDoc() {
-      while (true) {
-        pos++;
-        if (pos < vectors) {
-          int docID = docID();
-          if (needsScoring.test(docID)) {
-            return docID;
-          }
-        } else {
-          return NO_MORE_DOCS;
-        }
-      }
-    }
-
-    @Override
-    public int advance(int target) throws IOException {
-      return slowAdvance(target);
-    }
-
-    @Override
-    public long cost() {
+      slicePos = indexInput.getFilePointer();
       return vectors;
     }
 
     @Override
-    public float score() throws IOException {
+    public int visit(KnnCollector knnCollector) throws IOException {
+      int scoreDocs = 0;
+      assert slicePos == indexInput.getFilePointer();
+      for (int i = 0; i < vectors; i++) {
+        final int docId = docIdsScratch[i];
+        if (needsScoring.test(docId) == false) {
+          continue;
+        }
+        quantizeQueryIfNecessary();
+        indexInput.seek(slicePos + i * quantizedByteLength);
+        final float qcDist = osqVectorsScorer.quantizeScore(quantizedQueryScratch);
+        indexInput.readFloats(correctiveValues, 0, correctiveValues.length);
+        final int quantizedComponentSum = Short.toUnsignedInt(indexInput.readShort());
+        float score =
+            osqVectorsScorer.score(
+                queryCorrections,
+                fieldInfo.getVectorSimilarityFunction(),
+                centroidDp,
+                correctiveValues[0],
+                correctiveValues[1],
+                quantizedComponentSum,
+                correctiveValues[2],
+                qcDist);
+        ++scoreDocs;
+        knnCollector.incVisitedCount(1);
+        knnCollector.collect(docId, score);
+        if (knnCollector.earlyTerminated()) {
+          return scoreDocs;
+        }
+      }
+      return scoreDocs;
+    }
+
+    private void quantizeQueryIfNecessary() {
       if (quantized == false) {
         System.arraycopy(target, 0, scratch, 0, target.length);
         if (fieldInfo.getVectorSimilarityFunction() == COSINE) {
@@ -350,19 +353,6 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         transposeHalfByte(quantizationScratch, quantizedQueryScratch);
         quantized = true;
       }
-      postingsSlice.seek(slicePos + pos * quantizedByteLength);
-      final float qcDist = osqVectorsScorer.quantizeScore(quantizedQueryScratch);
-      postingsSlice.readFloats(correctiveValues, 0, correctiveValues.length);
-      final int quantizedComponentSum = Short.toUnsignedInt(postingsSlice.readShort());
-      return osqVectorsScorer.score(
-          queryCorrections,
-          fieldInfo.getVectorSimilarityFunction(),
-          centroidDp,
-          correctiveValues[0],
-          correctiveValues[1],
-          quantizedComponentSum,
-          correctiveValues[2],
-          qcDist);
     }
   }
 }

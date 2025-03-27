@@ -9,7 +9,7 @@ package org.apache.lucene.sandbox.codecs.quantization;
 import java.io.IOException;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
-import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
@@ -34,12 +34,15 @@ public class IVFUtils {
     float score(int centroidOrdinal) throws IOException;
   }
 
-  public abstract static class PostingsScorer extends DocIdSetIterator {
+  public abstract static class PostingVisitor {
     // TODO maybe we can not specifically pass the centroid...
-    public abstract void resetPostingsScorer(int centroidOrdinal, float[] centroid)
+
+    /** returns the number of documents in the posting list */
+    public abstract int resetPostingsScorer(int centroidOrdinal, float[] centroid)
         throws IOException;
 
-    public abstract float score() throws IOException;
+    /** returns the number of scored documents */
+    public abstract int visit(KnnCollector collector) throws IOException;
   }
 
   public interface VectorCentroidScorer {
