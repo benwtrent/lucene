@@ -506,35 +506,53 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         // between the largeset and next largest segments find pairwise the clusters closest to one another
         FloatVectorValues mergingSegment = centroidList.get(orderedSegments[i]);
         List<Integer> candidateCentroids = IntStream.range(0, mergingSegment.size()).boxed().collect(Collectors.toCollection(LinkedList::new));
+
+      // compute distances between all candidates in the segment and pick the median or min distance and that's the threshold for merging into the base centroid below
+      // FIXME: consider using median distance instead of min
+        float minimumDistance = Float.MAX_VALUE;
+        for(int j = 0; j < candidateCentroids.size(); j++) {
+          float[] candidate1Value = mergingSegment.vectorValue(candidateCentroids.get(j));
+          for(int k = j; k < candidateCentroids.size(); k++) {
+            float[] candidate2Value = mergingSegment.vectorValue(candidateCentroids.get(k));
+
+            float d = VectorUtil.squareDistance(candidate1Value, candidate2Value);
+            if(d < minimumDistance) {
+              minimumDistance = d;
+            }
+          }
+        }
+
         for(int j = 0; j < baseSegment.size(); j++) {
           float[] baseCentroid = baseSegment.vectorValue(j);
 
-          int closest = 0;
+          int closest = -1;
 
           // check for if we have run out of candidates to merge with and should just keep this current cluster by itself
           if(!candidateCentroids.isEmpty()) {
             // FIXME: need to respect similarity function?? .. don't think so?
-            float closestDistance = VectorUtil.squareDistance(baseCentroid, mergingSegment.vectorValue(candidateCentroids.get(0)));
-            for (int k = 1; k < candidateCentroids.size(); k++) {
+            float closestDistance = minimumDistance;
+            for (int k = 0; k < candidateCentroids.size(); k++) {
               float[] mergingCentroid = mergingSegment.vectorValue(k);
 
-              // FIXME: wags refine this
-              // FIXME: compute distances between all candidates in the segment and pick the median or min distance and that's the threshold
-              // FIXME: probably should be some max distance here we are willing to merge centroids and otherwise we treat them both as lone centroids? (essentially just appending them)
+              // we are willing to merge centroids only if within the min distance and otherwise we treat them both as lone centroids (essentially just appending them)
               float d = VectorUtil.squareDistance(baseCentroid, mergingCentroid);
-              if (d < closestDistance) {
+
+              if(d < closestDistance) {
                 closestDistance = d;
                 closest = k;
               }
             }
 
-            // remove the centroid from consideration at this point
-            candidateCentroids.remove(closest);
+            // only merge if we actually found a candidate within the appropriate threshold
+            if(closest != -1) {
+              // remove the centroid from consideration at this point
+              candidateCentroids.remove(closest);
 
-            // store a mapping of pairs of cluster to their new candidate cluster
-            SegmentCentroid merging = new SegmentCentroid(orderedSegments[i], closest);
-            priorCentroidLookup.get(j).add(merging);
-            mergedCentroidsTotalVectorCount.compute(j, (_, v) -> v + centroidsVectorCount.get(merging));
+              // store a mapping of pairs of cluster to their new candidate cluster
+              SegmentCentroid merging = new SegmentCentroid(orderedSegments[i], closest);
+              priorCentroidLookup.get(j).add(merging);
+              mergedCentroidsTotalVectorCount.compute(j, (_, v) -> v + centroidsVectorCount.get(merging));
+            }
           }
         }
     }
@@ -590,7 +608,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
           centroidsToCombine[i] = centroidList.get(sc.segment).vectorValue(sc.centroid);
         }
 
-        // FIXME: wags push up sep branch
         // FIXME: wags refine this
         // FIXME: for now we assume the clusters are relatively close in size and therefore we never split an already split cluster again (probably a bad assumption long term)
         // FIXME: need to account for being able to split them again? ... split their counts in half and then maybe the split centroids will need splitting as well? or could proactively split them until they are smaller than the smallest centroid?
