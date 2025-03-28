@@ -435,6 +435,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     return centroids.length;
   }
 
+  // FIXME: write a new calculateAndWriteCentroids that appends all the centroids then combines centroids based on proximity until the desired number of clusters is achieved
+
   @Override
   protected int calculateAndWriteCentroids(
       FieldInfo fieldInfo,
