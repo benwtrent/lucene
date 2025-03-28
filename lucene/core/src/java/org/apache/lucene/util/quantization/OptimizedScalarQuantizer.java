@@ -68,6 +68,9 @@ public class OptimizedScalarQuantizer {
   private final float lambda;
   // the number of iterations to optimize the quantization intervals
   private final int iters;
+  private final float[] statsScratch;
+  private final float[] gridScratch;
+  private final float[] intervalScratch;
 
   /**
    * Create a new scalar quantizer with the given similarity function, lambda, and number of
@@ -82,6 +85,9 @@ public class OptimizedScalarQuantizer {
     this.similarityFunction = similarityFunction;
     this.lambda = lambda;
     this.iters = iters;
+    this.statsScratch = new float[similarityFunction == EUCLIDEAN ? 5 : 6];
+    this.gridScratch = new float[5];
+    this.intervalScratch = new float[2];
   }
 
   /**
@@ -121,18 +127,16 @@ public class OptimizedScalarQuantizer {
     assert similarityFunction != COSINE || VectorUtil.isUnitVector(vector);
     assert similarityFunction != COSINE || VectorUtil.isUnitVector(centroid);
     assert bits.length == destinations.length;
-    float[] intervalScratch = new float[2];
-    float[] stats = similarityFunction == EUCLIDEAN ? new float[5] : new float[6];
     if (similarityFunction == EUCLIDEAN) {
-      VectorUtil.centerAndCalculateOSQStatsEuclidean(vector, centroid, vector, stats);
+      VectorUtil.centerAndCalculateOSQStatsEuclidean(vector, centroid, vector, statsScratch);
     } else {
-      VectorUtil.centerAndCalculateOSQStatsDp(vector, centroid, vector, stats);
+      VectorUtil.centerAndCalculateOSQStatsDp(vector, centroid, vector, statsScratch);
     }
-    float vecMean = stats[0];
-    float vecVar = stats[1];
-    float norm2 = stats[2];
-    float min = stats[3];
-    float max = stats[4];
+    float vecMean = statsScratch[0];
+    float vecVar = statsScratch[1];
+    float norm2 = statsScratch[2];
+    float min = statsScratch[3];
+    float max = statsScratch[4];
     double vecStd = Math.sqrt(vecVar);
     QuantizationResult[] results = new QuantizationResult[bits.length];
     for (int i = 0; i < bits.length; ++i) {
@@ -159,9 +163,9 @@ public class OptimizedScalarQuantizer {
       }
       results[i] =
           new QuantizationResult(
-              intervalScratch[0],
-              intervalScratch[1],
-              similarityFunction == EUCLIDEAN ? norm2 : stats[5],
+              a,
+              b,
+              similarityFunction == EUCLIDEAN ? norm2 : statsScratch[5],
               sumQuery);
     }
     return results;
@@ -182,19 +186,17 @@ public class OptimizedScalarQuantizer {
     assert similarityFunction != COSINE || VectorUtil.isUnitVector(centroid);
     assert vector.length <= destination.length;
     assert bits > 0 && bits <= 8;
-    float[] intervalScratch = new float[2];
     int points = 1 << bits;
-    float[] stats = similarityFunction == EUCLIDEAN ? new float[5] : new float[6];
     if (similarityFunction == EUCLIDEAN) {
-      VectorUtil.centerAndCalculateOSQStatsEuclidean(vector, centroid, vector, stats);
+      VectorUtil.centerAndCalculateOSQStatsEuclidean(vector, centroid, vector, statsScratch);
     } else {
-      VectorUtil.centerAndCalculateOSQStatsDp(vector, centroid, vector, stats);
+      VectorUtil.centerAndCalculateOSQStatsDp(vector, centroid, vector, statsScratch);
     }
-    float vecMean = stats[0];
-    float vecVar = stats[1];
-    float norm2 = stats[2];
-    float min = stats[3];
-    float max = stats[4];
+    float vecMean = statsScratch[0];
+    float vecVar = statsScratch[1];
+    float norm2 = statsScratch[2];
+    float min = statsScratch[3];
+    float max = statsScratch[4];
     double vecStd = Math.sqrt(vecVar);
     // Linearly scale the interval to the standard deviation of the vector, ensuring we are within
     // the min/max bounds
@@ -216,7 +218,7 @@ public class OptimizedScalarQuantizer {
     return new QuantizationResult(
         intervalScratch[0],
         intervalScratch[1],
-        similarityFunction == EUCLIDEAN ? norm2 : stats[5],
+        similarityFunction == EUCLIDEAN ? norm2 : statsScratch[5],
         sumQuery);
   }
 
@@ -236,15 +238,14 @@ public class OptimizedScalarQuantizer {
     if (Float.isFinite(scale) == false) {
       return;
     }
-    float[] gridPoints = new float[5];
     for (int i = 0; i < iters; ++i) {
       // calculate the grid points for coordinate descent
-      VectorUtil.calculateOSQGridPoints(vector, initInterval, points, gridPoints);
-      float daa = gridPoints[0];
-      float dab = gridPoints[1];
-      float dbb = gridPoints[2];
-      float dax = gridPoints[3];
-      float dbx = gridPoints[4];
+      VectorUtil.calculateOSQGridPoints(vector, initInterval, points, gridScratch);
+      float daa = gridScratch[0];
+      float dab = gridScratch[1];
+      float dbb = gridScratch[2];
+      float dax = gridScratch[3];
+      float dbx = gridScratch[4];
       double m0 = scale * dax * dax + lambda * daa;
       double m1 = scale * dax * dbx + lambda * dab;
       double m2 = scale * dbx * dbx + lambda * dbb;
