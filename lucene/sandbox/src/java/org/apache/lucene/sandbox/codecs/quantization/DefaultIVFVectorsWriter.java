@@ -510,20 +510,14 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       List<Integer> candidateCentroids = IntStream.range(0, mergingSegment.size()).boxed().collect(Collectors.toCollection(LinkedList::new));
 
       // compute distances between all candidates in the segment and pick the median or min distance and that's the threshold for merging into the base centroid below
-      // FIXME: what in the world ... the distances are all 0???
       // FIXME: could try mean or median instead
       float minimumDistance = Float.MAX_VALUE;
       for(int j = 0; j < mergingSegment.size(); j++) {
-        float[] candidate1Value = mergingSegment.vectorValue(j);
-        System.out.println("==== check 197");
-        System.out.println(Arrays.toString(candidate1Value));
+        float[] candidate1Value = Arrays.copyOf(mergingSegment.vectorValue(j), mergingSegment.dimension());
         for(int k = j+1; k < mergingSegment.size(); k++) {
-          float[] candidate2Value = mergingSegment.vectorValue(k);
-          System.out.println(Arrays.toString(candidate2Value));
+          float[] candidate2Value = Arrays.copyOf(mergingSegment.vectorValue(k), mergingSegment.dimension());
 
           float d = VectorUtil.squareDistance(candidate1Value, candidate2Value);
-          System.out.println("==== check 198");
-          System.out.println(d);
           if(d < minimumDistance) {
             minimumDistance = d;
           }
@@ -534,7 +528,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       System.out.println(minimumDistance);
 
       for(int j = 0; j < baseSegment.size(); j++) {
-        float[] baseCentroid = baseSegment.vectorValue(j);
+        float[] baseCentroid = Arrays.copyOf(baseSegment.vectorValue(j), baseSegment.dimension());
 
         int closest = -1;
 
@@ -543,7 +537,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
           // FIXME: need to respect similarity function?? .. don't think so?
           float closestDistance = minimumDistance;
           for (int k = 0; k < candidateCentroids.size(); k++) {
-            float[] mergingCentroid = mergingSegment.vectorValue(k);
+            float[] mergingCentroid = Arrays.copyOf(mergingSegment.vectorValue(k), mergingSegment.dimension());
 
             // we are willing to merge centroids only if within the min distance and otherwise we treat them both as lone centroids (essentially just appending them)
             float d = VectorUtil.squareDistance(baseCentroid, mergingCentroid);
@@ -622,7 +616,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
       // combine all the centroids in the group and them split them out into just two
       assert largestArrayOfCentroids != null;
-      float[] baseCentroid = baseSegment.vectorValue(baseCentroidIndex);
+      float[] baseCentroid = Arrays.copyOf(baseSegment.vectorValue(baseCentroidIndex), baseSegment.dimension());
       int baseCentroidVectorCount = centroidsVectorCount.get(new SegmentCentroid(orderedSegments[0], baseCentroidIndex));
 
       if(largestArrayOfCentroids.isEmpty()) {
@@ -652,7 +646,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         float[][] centroidsToCombine = new float[largestArrayOfCentroids.size()][];
         for (int i = 0; i < largestArrayOfCentroids.size(); i++) {
           SegmentCentroid sc = largestArrayOfCentroids.get(i);
-          centroidsToCombine[i] = centroidList.get(sc.segment).vectorValue(sc.centroid);
+          FloatVectorValues segment = centroidList.get(sc.segment);
+          centroidsToCombine[i] = Arrays.copyOf(segment.vectorValue(sc.centroid), segment.dimension());
           centroidsToCombineVectorCount[i] = centroidsVectorCount.get(new SegmentCentroid(sc.segment, sc.centroid));
         }
 
@@ -671,14 +666,15 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
     for(Map.Entry<Integer, Boolean> entry : isMerged.entrySet()) {
       if(!entry.getValue()) {
-        float[] baseCentroid = baseSegment.vectorValue(entry.getKey());
+        float[] baseCentroid = Arrays.copyOf(baseSegment.vectorValue(entry.getKey()), baseSegment.dimension());
         int baseCentroidVectorCount = centroidsVectorCount.get(new SegmentCentroid(orderedSegments[0], entry.getKey()));
         List<SegmentCentroid> centroids = priorCentroidLookup.get(entry.getKey());
         int[] centroidsToCombineVectorCount = new int[centroids.size()];
         float[][] centroidsToCombine = new float[centroids.size()][];
         for(int i = 0; i < centroids.size(); i++) {
           SegmentCentroid sc = centroids.get(i);
-          centroidsToCombine[i] = centroidList.get(orderedSegments[sc.segment]).vectorValue(sc.centroid);
+          FloatVectorValues segment = centroidList.get(orderedSegments[sc.segment]);
+          centroidsToCombine[i] = Arrays.copyOf(segment.vectorValue(sc.centroid), segment.dimension());
           centroidsToCombineVectorCount[i] = centroidsVectorCount.get(new SegmentCentroid(sc.segment, sc.centroid));
         }
 
@@ -722,10 +718,10 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     System.out.println("== check 3");
     System.out.println(initCentroidsIndex);
 
-//    for(int i = 0; i < initCentroids.length; i++) {
-//      System.out.print(Arrays.toString(initCentroids[i]));
-//    }
-//    System.out.println();
+    for(int i = 0; i < initCentroids.length; i++) {
+      System.out.print(Arrays.toString(initCentroids[i]));
+    }
+    System.out.println();
 
     // FIXME: need a way to maintain the original mapping ... update KMeans to allow maintaining that mapping
 
