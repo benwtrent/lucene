@@ -491,12 +491,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     centroidCountInSegment.sort((i, j) -> i.centroidCount < j.centroidCount ? 1 : -1);
     int[] orderedSegments = centroidCountInSegment.stream().map(i -> i.segmentIndex).mapToInt(Integer::intValue).toArray();
 
-    System.out.println("== check 0");
-    System.out.println(centroidList.size());
-    System.out.println(Arrays.toString(orderedSegments));
-    System.out.println(centroidCountInSegment);
-    System.out.println(centroidsVectorCount.entrySet());
-
     FloatVectorValues baseSegment = centroidList.get(orderedSegments[0]);
 
     for(int j = 0; j < baseSegment.size(); j++) {
@@ -524,9 +518,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         }
       }
 
-      System.out.println("==== check 199");
-      System.out.println(minimumDistance);
-
       for(int j = 0; j < baseSegment.size(); j++) {
         float[] baseCentroid = Arrays.copyOf(baseSegment.vectorValue(j), baseSegment.dimension());
 
@@ -541,10 +532,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
             // we are willing to merge centroids only if within the min distance and otherwise we treat them both as lone centroids (essentially just appending them)
             float d = VectorUtil.squareDistance(baseCentroid, mergingCentroid);
-
-            System.out.println("==== check 200");
-            System.out.println(d);
-
             if(d < closestDistance) {
               closestDistance = d;
               closest = k;
@@ -600,9 +587,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       ));
     }
 
-    System.out.println("==== check 12");
-    System.out.println(centroidsToMerge);
-
     // we init with the total number of centroids we plan to merge
     int totalCentroidsCount = priorCentroidLookup.size();
     while(totalCentroidsCount < desiredClusters && !centroidsToMerge.isEmpty()) {
@@ -654,7 +638,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         // FIXME: try not splitting at all and just keeping the large centroid (disable the kmeans pass below as well?)
         // FIXME: pull this out and only do a combine and split once with the last split level (measure how often this occurs)
         float[] combinedCentroid = combineCentroidsWeightedAvg(baseCentroid, baseCentroidVectorCount, centroidsToCombine, centroidsToCombineVectorCount);
-        System.out.println("=== split level: " + splitLevel);
+        System.out.println("combined");
+        System.out.println(Arrays.toString(combinedCentroid));
         FloatCentroidSplits splitCentroid = splitCentroid(combinedCentroid, splitLevel);
         splitCentroids.put(baseCentroidIndex, splitCentroid);
         isMerged.put(baseCentroidIndex, true);
@@ -687,18 +672,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     assert totalCentroidsCount == desiredClusters;
     float[][] initCentroids = new float[totalCentroidsCount][];
 
-    System.out.println("== check 1");
-    System.out.println(priorCentroidLookup.size());
-    System.out.println(desiredClusters);
-    System.out.println(splitCentroids.size());
-    System.out.println(loneCentroids.size());
-    System.out.println(isMerged.size());
-    System.out.println(totalCentroidsCount);
-    System.out.println(baseSegment.size());
-
-    System.out.println("== check 2");
-    System.out.println(initCentroids.length);
-
     int mergedCount = 0;
     int initCentroidsIndex = 0;
     for(int i = 0; i < baseSegment.size(); i++) {
@@ -707,21 +680,16 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         FloatCentroidSplits centroidPair = splitCentroids.get(i);
         for(int j = 0; j < centroidPair.centroids.length; j++) {
           initCentroids[initCentroidsIndex++] = centroidPair.centroids[j];
+          System.out.println("merged");
+          System.out.println(Arrays.toString(centroidPair.centroids[j]));
         }
         mergedCount++;
       } else {
         initCentroids[initCentroidsIndex++] = loneCentroids.get(i);
+//        System.out.println("lone");
+//        System.out.println(Arrays.toString(loneCentroids.get(i)));
       }
     }
-
-    System.out.println(mergedCount);
-    System.out.println("== check 3");
-    System.out.println(initCentroidsIndex);
-
-    for(int i = 0; i < initCentroids.length; i++) {
-      System.out.print(Arrays.toString(initCentroids[i]));
-    }
-    System.out.println();
 
     // FIXME: need a way to maintain the original mapping ... update KMeans to allow maintaining that mapping
 
@@ -772,31 +740,26 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     // FIXME: run a custom version of kmeans that adjusts the centroids that were split related to only the sets of vectors that were previously associated with the prior centroids
 
     // FIXME: compare this kmeans outcome with a lot of iterations with the outcome of the process detailed above; ideally a large run of kmeans is approximated by the above algorithm
-//    long nanoTime = System.nanoTime();
-//    final KMeans.Results kMeans =
-//        KMeans.cluster(
-//            floatVectorValues,
-//            desiredClusters,
-//            false,
-//            42L,
-//            KMeans.KmeansInitializationMethod.PLUS_PLUS,
-//            initCentroids,
-//            fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
-//            initCentroids == null ? DEFAULT_RESTARTS : 1,
-//            initCentroids == null ? DEFAULT_ITRS : 5,
-//            desiredClusters * 64);
-//    if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
-//      mergeState.infoStream.message(
-//          IVF_VECTOR_COMPONENT, "KMeans time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
-//    }
-//    float[][] centroids = kMeans.centroids();
+    long nanoTime = System.nanoTime();
+    final KMeans.Results kMeans =
+        KMeans.cluster(
+            floatVectorValues,
+            desiredClusters,
+            false,
+            42L,
+            KMeans.KmeansInitializationMethod.PLUS_PLUS,
+            initCentroids,
+            fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
+            initCentroids == null ? DEFAULT_RESTARTS : 1,
+            initCentroids == null ? DEFAULT_ITRS : 5,
+            desiredClusters * 64);
+    if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+      mergeState.infoStream.message(
+          IVF_VECTOR_COMPONENT, "KMeans time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
+    }
+    float[][] centroids = kMeans.centroids();
 
-    System.out.println("=== check 9");
-    System.out.println(initCentroids.length);
-    System.out.println(initCentroids[0].length);
-
-    float[][] centroids = initCentroids;
-
+//    float[][] centroids = initCentroids;
 
     // write them
     OptimizedScalarQuantizer osq =
@@ -866,7 +829,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     float[][] splitCentroids = new float[splitLevel][centroid.length];
 
     for(int i = 0; i < splitCentroids.length; i++) {
-      System.arraycopy(centroid, 0, splitCentroids[i], 0, splitCentroids.length);
+      System.arraycopy(centroid, 0, splitCentroids[i], 0, centroid.length);
     }
 
     for(int i = 0; i < centroid.length; i++) {
