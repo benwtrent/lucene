@@ -221,7 +221,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         (int)
             Math.max(
                 maxNumClusters / 16.0,
-                Math.min(Math.sqrt(floatVectorValues.size()), maxNumClusters));
+                Math.max(Math.sqrt(floatVectorValues.size()), maxNumClusters));
     // init centroids from merge state
     List<FloatVectorValues> centroidList = new ArrayList<>();
     for (var reader : mergeState.knnVectorsReaders) {
