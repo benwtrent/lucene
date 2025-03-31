@@ -163,10 +163,7 @@ public class OptimizedScalarQuantizer {
       }
       results[i] =
           new QuantizationResult(
-              a,
-              b,
-              similarityFunction == EUCLIDEAN ? norm2 : statsScratch[5],
-              sumQuery);
+              a, b, similarityFunction == EUCLIDEAN ? norm2 : statsScratch[5], sumQuery);
     }
     return results;
   }

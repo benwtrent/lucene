@@ -117,6 +117,13 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
         entry.centroidSlice(ivfCentroids), entry.postingListOffsets.length, fieldInfo);
   }
 
+  int centroidSize(String fieldName, int centroidOrdinal) throws IOException {
+    FieldInfo fieldInfo = state.fieldInfos.fieldInfo(fieldName);
+    FieldEntry entry = fields.get(fieldInfo.number);
+    ivfClusters.seek(entry.postingListOffsets[centroidOrdinal]);
+    return ivfClusters.readVInt();
+  }
+
   private static IndexInput openDataInput(
       SegmentReadState state,
       int versionMeta,
@@ -263,10 +270,10 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     // TODO can we make a conjunction between idSetIterator and the acceptDocs?
     IntPredicate needsScoring =
         docId -> {
-          if (visitedDocs.getAndSet(docId)) {
+          if (acceptDocs != null && acceptDocs.get(docId) == false) {
             return false;
           }
-          return acceptDocs == null || acceptDocs.get(docId) != false;
+          return visitedDocs.getAndSet(docId) == false;
         };
 
     FieldEntry entry = fields.get(fieldInfo.number);
