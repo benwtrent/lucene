@@ -211,8 +211,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     return new OffHeapCentroidAssignmentScorer(centroidsInput, numCentroids, fieldInfo);
   }
 
-  // FIXME: write a utility that compares the clusters this generates with an ideal set of clusters after running kmeans brute force
-
   record SegmentCentroid(
     int segment,
     int centroid,
@@ -252,62 +250,53 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       segmentIdx++;
     }
 
-    // merge clusters in the size order
-    // sort centroid list by floatvector size
-    centroidList.sort(Comparator.comparingInt(FloatVectorValues::size).reversed());
-    FloatVectorValues baseSegment = centroidList.get(0);
     float minimumDistance = Float.MAX_VALUE;
-    for(int j = 0; j < baseSegment.size(); j++) {
-      for(int k = j+1; k < baseSegment.size(); k++) {
-        float[] vector1 = new float[fieldInfo.getVectorDimension()];
-        float[] vector2 = new float[fieldInfo.getVectorDimension()];
-        System.arraycopy(baseSegment.vectorValue(j), 0, vector1, 0, fieldInfo.getVectorDimension());
-        System.arraycopy(baseSegment.vectorValue(k), 0, vector2, 0, fieldInfo.getVectorDimension());
-        float d = VectorUtil.squareDistance(vector1, vector2);
-        if(d < minimumDistance) {
-          minimumDistance = d;
+    float[] vector1 = new float[fieldInfo.getVectorDimension()];
+    float[] vector2 = new float[fieldInfo.getVectorDimension()];
+
+    // FIXME: may want to have a cache that's fixed in size and dump some of the scores if we don't need them for the subsequent step and recompute if needed
+    // keep track of all inter-centroid distances,
+    float[][] scores = new float[segmentCentroids.size()][segmentCentroids.size()];
+    for (int i = 0; i < segmentCentroids.size(); i++) {
+      SegmentCentroid segmentCentroid = segmentCentroids.get(i);
+      System.arraycopy(centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid), 0, vector1, 0, fieldInfo.getVectorDimension());
+      for (int j = i + 1; j < segmentCentroids.size(); j++) {
+        SegmentCentroid toCompare = segmentCentroids.get(j);
+          System.arraycopy(centroidList.get(toCompare.segment).vectorValue(toCompare.centroid), 0, vector2, 0, fieldInfo.getVectorDimension());
+          scores[i][j] = VectorUtil.squareDistance(vector1, vector2);
+          if( scores[i][j] < minimumDistance ) {
+            minimumDistance = scores[i][j];
         }
       }
     }
 
-    minimumDistance = 1;
-
     int[] labels = new int[segmentCentroids.size()];
     // loop over segments
     int clusterIdx = 0;
-    float[] vector1 = new float[fieldInfo.getVectorDimension()];
-    float[] vector2 = new float[fieldInfo.getVectorDimension()];
 
     boolean[][] scoreExists = new boolean[segmentCentroids.size()][segmentCentroids.size()];
-    float[][] scores = new float[segmentCentroids.size()][segmentCentroids.size()];
-    // keep track of all inter-centroid distances,
-    // using less than centroid * centroid space (e.g. not keeping track of duplicates)
+
+    for (int i = 0; i < segmentCentroids.size(); i++) {
+        clusterIdx += 1;
+        labels[i] = clusterIdx;
+    }
 
     // FIXME: take incount total vectors in a collapsed cluster instead of just distance so weighted distance instead? ... seeing lots of clusters collapse into each other nearby particularly with the expanding ring approach
+    // FIXME: another alternative would be to expand our exploration more slowly (by less than 10% each time) since this greedily will collapse clusters in the order seen right now
     int totalUniqueLabels = segmentCentroids.size();
     float minimumDistanceMultiplier = 1;
     while(totalUniqueLabels > desiredClusters) {
-      boolean labelChanged = false;
+      int labelChanged = 0;
       for (int i = 0; i < segmentCentroids.size(); i++) {
-        if (labels[i] == 0) {
-          clusterIdx += 1;
-          labels[i] = clusterIdx;
-        }
-        SegmentCentroid segmentCentroid = segmentCentroids.get(i);
-        // FIXME: could only get these on distance computation which may be slower but more memory efficient
-        System.arraycopy(centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid), 0, vector1, 0, fieldInfo.getVectorDimension());
         for(int j = i + 1; j < segmentCentroids.size(); j++) {
-          SegmentCentroid toCompare = segmentCentroids.get(j);
           float d;
           if(!scoreExists[i][j]) {
-            System.arraycopy(centroidList.get(toCompare.segment).vectorValue(toCompare.centroid), 0, vector2, 0, fieldInfo.getVectorDimension());
-            scores[i][j] = VectorUtil.squareDistance(vector1, vector2);
             scoreExists[i][j] = true;
           }
           d = scores[i][j];
 
           if (d < (minimumDistance * minimumDistanceMultiplier)) {
-            labelChanged = true;
+            labelChanged++;
             if (labels[j] == 0) {
               labels[j] = labels[i];
             } else {
@@ -323,28 +312,39 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
                 }
               }
             }
+            // FIXME: this is expensive? need a better way to track unique labels
+            totalUniqueLabels = 0;
+            for(int k = 0; k < labels.length; k++) {
+              if(labels[k] == (k+1)) {
+                totalUniqueLabels++;
+              }
+            }
+          }
+          if(totalUniqueLabels <= desiredClusters) {
+            break;
           }
         }
+        if(totalUniqueLabels <= desiredClusters) {
+          break;
+        }
       }
-      System.out.println(Arrays.toString(labels));
+      // FIXME: since we do this inline do we need to do this again here??
       // FIXME: should be a way to track this inline instead of computing it every time ... do we really need to though?
-      if(labelChanged) {
+      if(labelChanged > 0) {
         totalUniqueLabels = 0;
         for(int k = 0; k < labels.length; k++) {
           if(labels[k] == (k+1)) {
             totalUniqueLabels++;
           }
-         }
+        }
       }
-      System.out.println(" === t: " + totalUniqueLabels);
+      System.out.println(" === t: " + totalUniqueLabels + ": " + desiredClusters + ": " + labelChanged);
       minimumDistanceMultiplier += 0.10f;
     }
 
     float[][] centroids = new float[desiredClusters][fieldInfo.getVectorDimension()];
-//    float[][] initCentroids = new float[desiredClusters][fieldInfo.getVectorDimension()];
     int[] sum = new int[desiredClusters];
 
-//    float[][] centroids = new float[desiredClusters][];
     int centroidIdx = 0;
     for (int i = 0; i < labels.length; i++) {
       if (labels[i] == (i + 1)) {
@@ -365,22 +365,11 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         centroids[i][j] /= sum[i];
       }
     }
-//
-//    for (int i = 0; i < segmentCentroids.size(); i++) {
-//      SegmentCentroid segmentCentroid = segmentCentroids.get(i);
-//      int label = labels[i];
-//      FloatVectorValues segment = centroidList.get(segmentCentroid.segment());
-//      float[] vector = segment.vectorValue(segmentCentroid.centroid);
-//      for (int j = 0; j < vector.length; j++) {
-//        initCentroids[label - 1][j] += (vector[j] * segmentCentroid.vectorCount);
-//      }
-//      sum[label - 1] += segmentCentroid.vectorCount;
-//    }
-//    for (int i = 0; i < initCentroids.length; i++) {
-//      for (int j = 0; j < initCentroids[i].length; j++) {
-//        initCentroids[i][j] /= sum[i];
-//      }
-//    }
+
+    // FIXME: once we have these centroids move them closer to the vectors they represent by
+    //  only shifting them based on the vectors they were originally associated with?
+    //  or just consider essentially a kmeans iteration that
+
     if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
       mergeState.infoStream.message(
         IVF_VECTOR_COMPONENT,
@@ -390,38 +379,19 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         "Gathered initCentroids:" + centroids.length + " for desired: " + desiredClusters);
     }
 
-//    System.out.println(Arrays.toString(initCentroids[0]));
-//    System.out.println(" ==== c: " + initCentroids.length);
-
+    // FIXME: write a utility that compares the clusters this generates with an ideal set of clusters after running kmeans brute force
+    // FIXME: compare these recall numbers with a brute force kmeans run
     // FIXME: still split to get to desired cluster count?
     // FIXME: need a way to maintain the original mapping ... update KMeans to allow maintaining
-    // that mapping
+    //  that mapping
     // FIXME: go update the assignCentroids code to respect that mapping from prior centroid to next
-    // centroid (via the scorer?)
+    //  centroid (via the scorer?)
     // FIXME: run a custom version of kmeans that adjusts the centroids that were split related to
-    // only the sets of vectors that were previously associated with the prior centroids
+    //  only the sets of vectors that were previously associated with the prior centroids
     // FIXME: compare this kmeans outcome with a lot of iterations with the outcome of the process
-    // detailed above; ideally a large run of kmeans is approximated by the above algorithm
-//    long nanoTime = System.nanoTime();
-//    final KMeans.Results kMeans =
-//      KMeans.cluster(
-//        floatVectorValues,
-//        desiredClusters,
-//        false,
-//        42L,
-//        KMeans.KmeansInitializationMethod.PLUS_PLUS,
-//        initCentroids,
-//        fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
-//        1,
-//        5,
-//        desiredClusters * 64);
-//    if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
-//      mergeState.infoStream.message(
-//        IVF_VECTOR_COMPONENT, "KMeans time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
-//    }
-//    float[][] centroids = kMeans.centroids();
+    //  detailed above; ideally a large run of kmeans is approximated by the above algorithm
 
-
+    System.out.println(totalUniqueLabels);
     System.out.println(desiredClusters);
     System.out.println(Arrays.toString(labels));
     System.out.println(labels.length);
@@ -429,190 +399,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     System.out.println(centroidIdx);
     System.out.println(Arrays.toString(centroids[0]));
     System.out.println(Arrays.toString(centroids[centroids.length - 1]));
-
-    // write them
-    OptimizedScalarQuantizer osq =
-      new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
-    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
-    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
-    for (float[] centroid : centroids) {
-      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
-      OptimizedScalarQuantizer.QuantizationResult result =
-        osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
-      IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
-    }
-    final ByteBuffer buffer =
-      ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
-        .order(ByteOrder.LITTLE_ENDIAN);
-    for (float[] centroid : centroids) {
-      buffer.asFloatBuffer().put(centroid);
-      temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
-    }
-    return centroids.length;
-  }
-
-//  @Override
-  protected int calculateAndWriteCentroidsMine(
-    FieldInfo fieldInfo,
-    FloatVectorValues floatVectorValues,
-    IndexOutput temporaryCentroidOutput,
-    MergeState mergeState,
-    float[] globalCentroid) throws IOException {
-    if (floatVectorValues.size() == 0) {
-      return 0;
-    }
-    int maxNumClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
-    int desiredClusters =
-      (int)
-        Math.max(
-          maxNumClusters / 16.0,
-          Math.min(Math.sqrt(floatVectorValues.size()), maxNumClusters));
-
-    // init centroids from merge state
-    List<FloatVectorValues> centroidList = new ArrayList<>();
-    List<SegmentCentroid> segmentCentroids = new ArrayList<>();
-
-    int segmentIdx = 0;
-    for (var reader : mergeState.knnVectorsReaders) {
-      IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(reader, fieldInfo.name);
-      if (ivfVectorsReader == null) {
-        continue;
-      }
-
-      FloatVectorValues centroid = ivfVectorsReader.getCentroids(fieldInfo);
-      centroidList.add(centroid);
-
-      //create a map of the sizes of the vectors attached to this centroid
-      for (int i = 0; i < centroid.size(); i++) {
-        int vectorCount = ivfVectorsReader.centroidSize(fieldInfo.name, i);
-        SegmentCentroid segmentCentroid = new SegmentCentroid(segmentIdx, i, vectorCount);
-        segmentCentroids.add(segmentCentroid);
-      }
-
-      segmentIdx++;
-    }
-
-    centroidList.sort(Comparator.comparingInt(FloatVectorValues::size).reversed());
-    FloatVectorValues baseSegment = centroidList.get(0);
-    float minimumDistance = Float.MAX_VALUE;
-    for(int j = 0; j < baseSegment.size(); j++) {
-      for(int k = j+1; k < baseSegment.size(); k++) {
-        float[] vector1 = new float[fieldInfo.getVectorDimension()];
-        float[] vector2 = new float[fieldInfo.getVectorDimension()];
-        System.arraycopy(baseSegment.vectorValue(j), 0, vector1, 0, fieldInfo.getVectorDimension());
-        System.arraycopy(baseSegment.vectorValue(k), 0, vector2, 0, fieldInfo.getVectorDimension());
-        float d = VectorUtil.squareDistance(vector1, vector2);
-        if(d < minimumDistance) {
-          minimumDistance = d;
-        }
-      }
-    }
-
-    int[] labels = new int[segmentCentroids.size()];
-    // loop over segments
-    int clusterIdx = 0;
-    float[] vector1 = new float[fieldInfo.getVectorDimension()];
-    float[] vector2 = new float[fieldInfo.getVectorDimension()];
-
-    float[][] scores = new float[segmentCentroids.size()][segmentCentroids.size()];
-    // FIXME: this works by progressively expanding the radius of the minDistance but it's slow (there's likely a better way to do this) and collapsing these further seems to overall hurt recall
-    //  ... try using the precomputed distances to compute what the min distance should be given all of the clusters?
-    int totalUniqueLabels = segmentCentroids.size();
-    float minimumDistanceMultiplier = 1;
-    while(totalUniqueLabels >= desiredClusters) {
-      for(int i = 0; i < segmentCentroids.size(); i++) {
-        boolean labelChanged = false;
-        if (labels[i] == 0) {
-          clusterIdx += 1;
-          labels[i] = clusterIdx;
-        }
-        SegmentCentroid segmentCentroid = segmentCentroids.get(i);
-        System.arraycopy(centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid), 0, vector1, 0, fieldInfo.getVectorDimension());
-        for(int j = i + 1; j < segmentCentroids.size(); j++) {
-          SegmentCentroid toCompare = segmentCentroids.get(j);
-          System.arraycopy(centroidList.get(toCompare.segment).vectorValue(toCompare.centroid), 0, vector2, 0, fieldInfo.getVectorDimension());
-          scores[i][j] = VectorUtil.squareDistance(vector1, vector2);
-          float d = scores[i][j];
-          if (d < (minimumDistance * minimumDistanceMultiplier)) {
-            //          if (d < minimumDistance) {
-            labelChanged = true;
-            if (labels[j] == 0) {
-              labels[j] = labels[i];
-            } else {
-
-              for (int k = 0; k < labels.length; k++) {
-                if (labels[k] == labels[j]) {
-                  labels[k] = labels[i];
-                }
-              }
-            }
-          }
-        }
-        if(labelChanged) {
-          totalUniqueLabels = (int) Arrays.stream(labels).distinct().count();
-          System.out.println(totalUniqueLabels);
-        }
-      }
-
-      System.out.println(totalUniqueLabels);
-      totalUniqueLabels = (int) Arrays.stream(labels).distinct().count();
-      minimumDistanceMultiplier += 0.1f;
-      System.out.println(minimumDistanceMultiplier);
-      System.out.println(totalUniqueLabels);
-      System.out.println(desiredClusters);
-      System.out.println(minimumDistance);
-    }
-    float[][] centroids = new float[clusterIdx][fieldInfo.getVectorDimension()];
-    int[] counts = new int[clusterIdx];
-    int[] sum = new int[clusterIdx];
-    for (int i = 0; i < segmentCentroids.size(); i++) {
-      SegmentCentroid segmentCentroid = segmentCentroids.get(i);
-      int label = labels[i];
-      FloatVectorValues segment = centroidList.get(segmentCentroid.segment());
-      float[] vector = segment.vectorValue(segmentCentroid.centroid);
-      for (int j = 0; j < vector.length; j++) {
-        centroids[label - 1][j] += (vector[j] * segmentCentroid.vectorCount);
-      }
-      sum[label - 1] += segmentCentroid.vectorCount;
-      counts[label - 1] += 1;
-    }
-    for (int i = 0; i < centroids.length; i++) {
-      for (int j = 0; j < centroids[i].length; j++) {
-        centroids[i][j] /= sum[i];
-      }
-    }
-
-    // FIXME: need a way to maintain the original mapping
-    // FIXME: go update the assignCentroids code to respect that mapping from prior centroid to next centroid (via the scorer?)
-
-    // FIXME: compare this kmeans outcome with a lot of iterations with the outcome of the process detailed above; ideally a large run of kmeans is approximated by the above algorithm
-
-    int[] totalUniqueLabels22 = Arrays.stream(labels).distinct().toArray();
-    System.out.println(Arrays.toString(labels));
-    System.out.println(Arrays.toString(totalUniqueLabels22));
-    System.out.println(totalUniqueLabels22.length);
-
-    float[][] initCentroids = new float[desiredClusters][];
-    int desiredIdx = 0;
-    for(int i  = 0; i < centroids.length; i++) {
-      if((i+1)==labels[i]) {
-        initCentroids[desiredIdx] = centroids[i];
-        desiredIdx++;
-      }
-    }
-
-    System.out.println(" ---- c3: " + desiredIdx);
-    System.out.println(" ---- c2: " + initCentroids.length);
-
-    // FIXME: bad bad bad
-    while(desiredIdx < desiredClusters) {
-      initCentroids[desiredIdx] = centroids[centroids.length-1];
-      desiredIdx++;
-    }
-
-    centroids = initCentroids;
-
-    System.out.println(" ---- c: " + centroids.length);
 
     // write them
     OptimizedScalarQuantizer osq =
