@@ -8,7 +8,6 @@ package org.apache.lucene.sandbox.codecs.quantization;
 
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.INDEX_BITS;
 import static org.apache.lucene.sandbox.codecs.quantization.IVFVectorsFormat.IVF_VECTOR_COMPONENT;
-import static org.apache.lucene.sandbox.codecs.quantization.KMeans.DEFAULT_ITRS;
 import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.discretize;
 import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.packAsBinary;
 
@@ -102,7 +101,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
             null,
             fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
             1,
-            DEFAULT_ITRS,
+            15,
             desiredClusters * 256);
     float[][] centroids = kMeans.centroids();
     // write them
@@ -242,24 +241,30 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     // sort centroid list by floatvector size
     centroidList.sort(Comparator.comparingInt(FloatVectorValues::size).reversed());
     FloatVectorValues baseSegment = centroidList.get(0);
-    FloatVectorValues baseSegment2 = centroidList.get(0);
+    float[] scratch = new float[fieldInfo.getVectorDimension()];
     float minimumDistance = Float.MAX_VALUE;
     for (int j = 0; j < baseSegment.size(); j++) {
+      System.arraycopy(baseSegment.vectorValue(j), 0, scratch, 0, baseSegment.dimension());
       for (int k = j + 1; k < baseSegment.size(); k++) {
-        float d =
-            VectorUtil.squareDistance(baseSegment.vectorValue(j), baseSegment2.vectorValue(k));
+        float d = VectorUtil.squareDistance(scratch, baseSegment.vectorValue(k));
         if (d < minimumDistance) {
           minimumDistance = d;
         }
       }
     }
+    if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+      mergeState.infoStream.message(
+          IVF_VECTOR_COMPONENT,
+          "Agglomerative cluster min distance: "
+              + minimumDistance
+              + " From biggest segment: "
+              + centroidList.get(0).size());
+    }
     int[] labels = new int[segmentCentroids.size()];
     // loop over segments
     int clusterIdx = 0;
-    float[] scratch = new float[fieldInfo.getVectorDimension()];
     // keep track of all inter-centroid distances,
     // using less than centroid * centroid space (e.g. not keeping track of duplicates)
-    // float[] distances = new float[(segmentCentroids.size() * (segmentCentroids.size() - 1)) / 2];
     for (int i = 0; i < segmentCentroids.size(); i++) {
       if (labels[i] == 0) {
         clusterIdx += 1;
@@ -273,12 +278,13 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
           0,
           baseSegment.dimension());
       for (int j = i + 1; j < segmentCentroids.size(); j++) {
-        SegmentCentroid toCompare = segmentCentroids.get(i);
         float d =
             VectorUtil.squareDistance(
                 scratch,
-                centroidList.get(toCompare.segment()).vectorValue(segmentCentroid.centroid));
-        if (d < minimumDistance) {
+                centroidList
+                    .get(segmentCentroids.get(j).segment())
+                    .vectorValue(segmentCentroids.get(j).centroid));
+        if (d < minimumDistance / 2) {
           if (labels[j] == 0) {
             labels[j] = labels[i];
           } else {
@@ -471,7 +477,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     // If soar > 0, then we actually need to apply the projection, otherwise, its just the second
     // nearest centroid
     // we at most will look at the 5 nearest centroids if possible
-    int soarClusterCheckCount = Math.min(numCentroids, 5);
+    int soarClusterCheckCount = Math.min(numCentroids - 1, 5);
     // if lambda is `0`, that just means overspill to the second nearest, so we will only check the
     // second nearest
     if (SOAR_LAMBDA == 0) {

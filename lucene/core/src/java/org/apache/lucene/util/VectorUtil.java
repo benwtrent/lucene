@@ -402,11 +402,11 @@ public final class VectorUtil {
   public static float soarResidual(float[] v1, float[] centroid, float[] originalResidual) {
     if (v1.length != centroid.length) {
       throw new IllegalArgumentException(
-        "vector dimensions differ: " + v1.length + "!=" + centroid.length);
+          "vector dimensions differ: " + v1.length + "!=" + centroid.length);
     }
     if (originalResidual.length != v1.length) {
       throw new IllegalArgumentException(
-        "vector dimensions differ: " + originalResidual.length + "!=" + v1.length);
+          "vector dimensions differ: " + originalResidual.length + "!=" + v1.length);
     }
     return IMPL.soarResidual(v1, centroid, originalResidual);
   }

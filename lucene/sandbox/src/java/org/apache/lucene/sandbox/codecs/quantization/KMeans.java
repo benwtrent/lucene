@@ -13,6 +13,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
  * with modifications under
  *
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
@@ -32,6 +33,7 @@ import java.util.Set;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.internal.hppc.IntArrayList;
+import org.apache.lucene.internal.hppc.IntObjectHashMap;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.NeighborQueue;
@@ -408,7 +410,8 @@ public class KMeans {
       }
     }
     if (unassignedCentroids.size() > 0) {
-      assignCentroids(vectors, centroids, unassignedCentroids);
+      throwAwayAndSplitCentroids(
+          vectors, centroids, docCentroids, centroidSize, unassignedCentroids);
     }
     if (normalizeCentroids) {
       for (float[] centroid : centroids) {
@@ -417,6 +420,82 @@ public class KMeans {
     }
     assert Arrays.stream(centroidSize).sum() == vectors.size();
     return sumSquaredDist;
+  }
+
+  void throwAwayAndSplitCentroids(
+      FloatVectorValues vectors,
+      float[][] centroids,
+      short[] docCentroids,
+      int[] centroidSize,
+      IntArrayList unassignedCentroidsIdxs)
+      throws IOException {
+    IntObjectHashMap<IntArrayList> splitCentroids =
+        new IntObjectHashMap<>(unassignedCentroidsIdxs.size());
+    // used for splitting logic
+    int[] splitSizes = Arrays.copyOf(centroidSize, centroidSize.length);
+    // FAISS style algorithm for splitting
+    for (int i = 0; i < unassignedCentroidsIdxs.size(); i++) {
+      int toSplit;
+      for (toSplit = 0; true; toSplit = (toSplit + 1) % centroids.length) {
+        /* probability to pick this cluster for split */
+        double p = (splitSizes[toSplit] - 1.0) / (float) (docCentroids.length - centroids.length);
+        float r = random.nextFloat();
+        if (r < p) {
+          break; /* found our cluster to be split */
+        }
+      }
+      int unassignedCentroidIdx = unassignedCentroidsIdxs.get(i);
+      // keep track of those that are split, this way we reassign docCentroids and fix up true size
+      // & centroids
+      splitCentroids.getOrDefault(toSplit, new IntArrayList()).add(unassignedCentroidIdx);
+      System.arraycopy(
+          centroids[toSplit],
+          0,
+          centroids[unassignedCentroidIdx],
+          0,
+          centroids[unassignedCentroidIdx].length);
+      for (int dim = 0; dim < centroids[unassignedCentroidIdx].length; dim++) {
+        if (dim % 2 == 0) {
+          centroids[unassignedCentroidIdx][dim] *= (1 + EPS);
+          centroids[toSplit][dim] *= (1 - EPS);
+        } else {
+          centroids[unassignedCentroidIdx][dim] *= (1 - EPS);
+          centroids[toSplit][dim] *= (1 + EPS);
+        }
+      }
+      splitSizes[unassignedCentroidIdx] = splitSizes[toSplit] / 2;
+      splitSizes[toSplit] -= splitSizes[unassignedCentroidIdx];
+    }
+    // now we need to reassign docCentroids and fix up true size & centroids
+    for (int i = 0; i < docCentroids.length; i++) {
+      int docCentroid = docCentroids[i];
+      IntArrayList split = splitCentroids.get(docCentroid);
+      if (split != null) {
+        // we need to reassign this doc
+        int bestCentroid = docCentroid;
+        float bestDist = VectorUtil.squareDistance(centroids[docCentroid], vectors.vectorValue(i));
+        for (int j = 0; j < split.size(); j++) {
+          int newCentroid = split.get(j);
+          float dist = VectorUtil.squareDistance(centroids[newCentroid], vectors.vectorValue(i));
+          if (dist < bestDist) {
+            bestCentroid = newCentroid;
+            bestDist = dist;
+          }
+        }
+        if (bestCentroid != docCentroid) {
+          // we need to update the centroid size
+          centroidSize[docCentroid]--;
+          centroidSize[bestCentroid]++;
+          docCentroids[i] = (short) bestCentroid;
+          // we need to update the old and new centroid accounting for size as well
+          for (int dim = 0; dim < centroids[docCentroid].length; dim++) {
+            centroids[docCentroid][dim] -= vectors.vectorValue(i)[dim] / centroidSize[docCentroid];
+            centroids[bestCentroid][dim] +=
+                vectors.vectorValue(i)[dim] / centroidSize[bestCentroid];
+          }
+        }
+      }
+    }
   }
 
   /**

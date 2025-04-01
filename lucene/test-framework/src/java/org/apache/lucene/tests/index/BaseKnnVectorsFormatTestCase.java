@@ -2084,6 +2084,7 @@ public abstract class BaseKnnVectorsFormatTestCase extends BaseIndexFileFormatTe
     }
     // Add some documents without a vector nor an id
     addDocuments(writer, null, 5);
+    writer.forceMerge(1);
     writer.close();
     return indexStore;
   }
