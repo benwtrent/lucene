@@ -286,7 +286,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     // FIXME: take incount total vectors in a collapsed cluster instead of just distance so weighted distance instead? ... seeing lots of clusters collapse into each other nearby particularly with the expanding ring approach
     int totalUniqueLabels = segmentCentroids.size();
     float minimumDistanceMultiplier = 1;
-    while((totalUniqueLabels-1) >= desiredClusters) {
+    while(totalUniqueLabels > desiredClusters) {
       boolean labelChanged = false;
       for (int i = 0; i < segmentCentroids.size(); i++) {
         if (labels[i] == 0) {
@@ -311,17 +311,23 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
             if (labels[j] == 0) {
               labels[j] = labels[i];
             } else {
+              int baseLabel = labels[i];
+              int labelIdx = i;
+              while(baseLabel != (labelIdx+1)) {
+                baseLabel = labels[baseLabel-1];
+                labelIdx = baseLabel-1;
+              }
               for (int k = 0; k < labels.length; k++) {
                 if (labels[k] == labels[j]) {
-                  labels[k] = labels[i];
+                  labels[k] = baseLabel;
                 }
               }
             }
           }
         }
       }
-      System.out.println("YOOOOO");
       System.out.println(Arrays.toString(labels));
+      // FIXME: should be a way to track this inline instead of computing it every time ... do we really need to though?
       if(labelChanged) {
         totalUniqueLabels = 0;
         for(int k = 0; k < labels.length; k++) {
