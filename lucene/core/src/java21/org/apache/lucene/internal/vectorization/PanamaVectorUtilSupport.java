@@ -1194,7 +1194,7 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
         FloatVector v1Vec = FloatVector.fromArray(FLOAT_SPECIES, v1, i);
         FloatVector v2Vec = FloatVector.fromArray(FLOAT_SPECIES, v2, i);
         FloatVector subVec = v1Vec.sub(v2Vec);
-        subVec.intoArray(result, 0);
+        subVec.intoArray(result, i);
       }
     }
     // tail
