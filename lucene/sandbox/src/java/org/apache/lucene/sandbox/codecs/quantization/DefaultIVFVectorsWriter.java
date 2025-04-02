@@ -41,6 +41,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
   static final boolean OVERSPILL_ENABLED = true;
   static final float SOAR_LAMBDA = 1.0f;
+  static final int EXT_SOAR_LIMIT_CHECK = 5;
 
   private final int vectorPerCluster;
 
@@ -476,8 +477,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     short numCentroids = (short) scorer.size();
     // If soar > 0, then we actually need to apply the projection, otherwise, its just the second
     // nearest centroid
-    // we at most will look at the 5 nearest centroids if possible
-    int soarClusterCheckCount = Math.min(numCentroids - 1, 5);
+    // we at most will look at the EXT_SOAR_LIMIT nearest centroids if possible
+    int soarClusterCheckCount = Math.min(numCentroids - 1, EXT_SOAR_LIMIT_CHECK);
     // if lambda is `0`, that just means overspill to the second nearest, so we will only check the
     // second nearest
     if (SOAR_LAMBDA == 0) {
