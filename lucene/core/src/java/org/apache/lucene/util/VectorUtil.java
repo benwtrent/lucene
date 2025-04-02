@@ -164,9 +164,10 @@ public final class VectorUtil {
    * @param v the vector to add to the destination
    */
   public static void add(float[] u, float[] v) {
-    for (int i = 0; i < u.length; i++) {
-      u[i] += v[i];
+    if (u.length != v.length) {
+      throw new IllegalArgumentException("vector dimensions differ: " + u.length + "!=" + v.length);
     }
+    IMPL.add(u, v, u);
   }
 
   /**

@@ -328,6 +328,15 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
   }
 
   @Override
+  public void add(float[] v1, float[] v2, float[] result) {
+    assert v1.length == v2.length;
+    assert v1.length == result.length;
+    for (int i = 0; i < v1.length; i++) {
+      result[i] = v1[i] + v2[i];
+    }
+  }
+
+  @Override
   public float soarResidual(float[] v1, float[] centroid, float[] originalResidual) {
     assert v1.length == centroid.length;
     assert v1.length == originalResidual.length;

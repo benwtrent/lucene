@@ -84,6 +84,8 @@ public interface VectorUtilSupport {
 
   void subtract(float[] v1, float[] v2, float[] result);
 
+  void add(float[] v1, float[] v2, float[] result);
+
   float soarResidual(float[] v1, float[] centroid, float[] originalResidual);
 
   /**

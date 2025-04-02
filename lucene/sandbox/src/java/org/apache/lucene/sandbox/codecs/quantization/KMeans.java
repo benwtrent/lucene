@@ -155,7 +155,7 @@ public class KMeans {
               initCentroids,
               restarts,
               iters);
-      centroids = kmeans.computeCentroids(normalizeCenters);
+      centroids = kmeans.computeCentroids();
     }
 
     short[] vectorCentroids = null;
@@ -209,6 +209,11 @@ public class KMeans {
   }
 
   private final float[] kmeansPlusPlusScratch;
+  private final float[] lowerBounds;
+  private final float[] upperBounds;
+  private final float[] s;
+  private final float[] centerMovement;
+  private final float[][] sumNewCenters;
 
   public KMeans(
       FloatVectorValues vectors,
@@ -228,15 +233,123 @@ public class KMeans {
     this.initCentroids = initCentroids;
     this.kmeansPlusPlusScratch =
         initializationMethod == KmeansInitializationMethod.PLUS_PLUS ? new float[numVectors] : null;
+    this.lowerBounds = new float[vectors.size()];
+    this.upperBounds = new float[vectors.size()];
+    Arrays.fill(upperBounds, Float.MAX_VALUE);
+    this.s = new float[numCentroids];
+    this.centerMovement = new float[numCentroids];
+    this.sumNewCenters = new float[numCentroids][vectors.dimension()];
   }
 
-  public float[][] computeCentroids(boolean normalizeCenters) throws IOException {
+  private void initS(float[][] centroids) {
+    for (int i = 0; i < centroids.length; i++) {
+      float[] c1 = centroids[i];
+      s[i] = Float.MAX_VALUE;
+      for (int j = 0; j < centroids.length; j++) {
+        if (i == j) {
+          continue;
+        }
+        float[] c2 = centroids[j];
+        float dist = VectorUtil.squareDistance(c1, c2);
+        if (dist < s[i]) {
+          s[i] = dist;
+        }
+      }
+      s[i] = (float) Math.sqrt(s[i]) / 2f;
+    }
+  }
+
+  private void changeAssignment(
+      int vecId, short newCluster, int[] centroidSizes, short[] docCentroids) throws IOException {
+    VectorUtil.subtract(
+        sumNewCenters[docCentroids[vecId]],
+        vectors.vectorValue(vecId),
+        sumNewCenters[docCentroids[vecId]]);
+    VectorUtil.add(sumNewCenters[newCluster], vectors.vectorValue(vecId));
+    centroidSizes[docCentroids[vecId]]--;
+    centroidSizes[newCluster]++;
+    docCentroids[vecId] = newCluster;
+  }
+
+  private void assign(
+      float[][] centroids, int[] centroidSize, short[] docCentroids, float[] upperBounds)
+      throws IOException {
+    for (int docID = 0; docID < vectors.size(); docID++) {
+      float[] vector = vectors.vectorValue(docID);
+      short bestCentroid = 0;
+      if (numCentroids > 1) {
+        float minSquaredDist = Float.MAX_VALUE;
+        for (short c = 0; c < numCentroids; c++) {
+          float squareDist = VectorUtil.squareDistance(centroids[c], vector);
+          if (squareDist < minSquaredDist) {
+            bestCentroid = c;
+            minSquaredDist = squareDist;
+          }
+        }
+        upperBounds[docID] = (float) Math.sqrt(minSquaredDist);
+      }
+
+      centroidSize[bestCentroid] += 1;
+      docCentroids[docID] = bestCentroid;
+      VectorUtil.add(sumNewCenters[bestCentroid], vector);
+    }
+    IntArrayList unassignedCentroids = new IntArrayList();
+    for (int c = 0; c < numCentroids; c++) {
+      if (centroidSize[c] == 0) {
+        unassignedCentroids.add(c);
+      }
+    }
+    if (unassignedCentroids.size() > 0) {
+      throwAwayAndSplitCentroids2(
+          centroids, docCentroids, centroidSize, upperBounds, unassignedCentroids);
+    }
+    moveCenters(centroids, sumNewCenters, centroidSize);
+  }
+
+  private int[] moveCenters(float[][] centroids, float[][] sumNewCenters, int[] centroidSize) {
+    int furtherestMovingCenter = -1;
+    int secondFurtherestMovingCenter = -1;
+    float[] newCenter = new float[centroids[0].length];
+    for (int i = 0; i < centroids.length; i++) {
+      centerMovement[i] = 0;
+      if (centroidSize[i] == 0) {
+        continue;
+      }
+      float[] center = centroids[i];
+      System.arraycopy(sumNewCenters[i], 0, newCenter, 0, newCenter.length);
+      int size = centroidSize[i];
+      for (int dim = 0; dim < center.length; dim++) {
+        newCenter[dim] /= size;
+        centerMovement[i] += (center[dim] - newCenter[dim]) * (center[dim] - newCenter[dim]);
+        center[dim] = newCenter[dim];
+      }
+      centerMovement[i] = (float) Math.sqrt(centerMovement[i]);
+      if (furtherestMovingCenter == -1) {
+        furtherestMovingCenter = i;
+      } else if (centerMovement[i] > centerMovement[furtherestMovingCenter]) {
+        secondFurtherestMovingCenter = furtherestMovingCenter;
+        furtherestMovingCenter = i;
+      } else if (secondFurtherestMovingCenter == -1
+          || centerMovement[i] > centerMovement[secondFurtherestMovingCenter]) {
+        secondFurtherestMovingCenter = i;
+      }
+    }
+    return new int[] {furtherestMovingCenter, secondFurtherestMovingCenter};
+  }
+
+  private void updateBounds(short[] docCentroids, int[] furthestMoving) {
+    for (int i = 0; i < docCentroids.length; i++) {
+      upperBounds[i] += centerMovement[docCentroids[i]];
+      lowerBounds[i] -=
+          (docCentroids[i] == furthestMoving[0]
+              ? centerMovement[furthestMoving[1]]
+              : centerMovement[furthestMoving[0]]);
+    }
+  }
+
+  public float[][] computeCentroids() throws IOException {
     short[] vectorCentroids = new short[numVectors];
-    double minSquaredDist = Double.MAX_VALUE;
-    double squaredDist = 0;
-    float[][] bestCentroids = null;
     float[][] centroids = new float[numCentroids][vectors.dimension()];
-    int restarts = this.restarts;
     int numInitializedCentroids = 0;
     // The user has given us a solid number of centroids to start of with, so skip restarts, fill in
     // where we can, and refine
@@ -246,36 +359,58 @@ public class KMeans {
         System.arraycopy(initCentroids[i], 0, centroids[i], 0, initCentroids[i].length);
       }
       numInitializedCentroids = i;
-      restarts = 1;
     }
 
-    for (int restart = 0; restart < restarts; restart++) {
-      switch (initializationMethod) {
-        case FORGY -> initializeForgy(centroids, numInitializedCentroids);
-        case RESERVOIR_SAMPLING -> initializeReservoirSampling(centroids, numInitializedCentroids);
-        case PLUS_PLUS -> initializePlusPlus(centroids, numInitializedCentroids);
-      }
-      double prevSquaredDist = Double.MAX_VALUE;
-      int[] centroidSize = new int[centroids.length];
-      for (int iter = 0; iter < iters; iter++) {
-        squaredDist = runKMeansStep(centroids, centroidSize, vectorCentroids, normalizeCenters);
-        // Check for convergence
-        if (prevSquaredDist <= (squaredDist + 1e-6)) {
-          break;
-        }
-        Arrays.fill(centroidSize, 0);
-        prevSquaredDist = squaredDist;
-      }
-      if (squaredDist < minSquaredDist) {
-        minSquaredDist = squaredDist;
-        // Copy out the best centroid as it might be overwritten by the next restart
-        bestCentroids = new float[centroids.length][];
-        for (int i = 0; i < centroids.length; i++) {
-          bestCentroids[i] = ArrayUtil.copyArray(centroids[i]);
-        }
-      }
+    switch (initializationMethod) {
+      case FORGY -> initializeForgy(centroids, numInitializedCentroids);
+      case RESERVOIR_SAMPLING -> initializeReservoirSampling(centroids, numInitializedCentroids);
+      case PLUS_PLUS -> initializePlusPlus(centroids, numInitializedCentroids);
     }
-    return bestCentroids;
+    int[] centroidSize = new int[centroids.length];
+    assign(centroids, centroidSize, vectorCentroids, upperBounds);
+    for (int iter = 0; iter < iters; iter++) {
+      initS(centroids);
+      boolean changed = false;
+      for (int i = 0; i < vectors.size(); i++) {
+        float[] vector = vectors.vectorValue(i);
+        short nearest = vectorCentroids[i];
+        float upperComparisonBound = Math.max(s[nearest], lowerBounds[i]);
+        if (upperBounds[i] <= upperComparisonBound) {
+          continue;
+        }
+        float newLower = Float.MAX_VALUE;
+        float u2 = upperBounds[i] * upperBounds[i];
+        for (int j = 0; j < numCentroids; j++) {
+          if (j == nearest) {
+            continue;
+          }
+          float dist = VectorUtil.squareDistance(centroids[j], vector);
+          if (dist < u2) {
+            newLower = u2;
+            u2 = dist;
+            nearest = (short) j;
+          } else if (dist < newLower) {
+            newLower = dist;
+          }
+        }
+        lowerBounds[i] = (float) Math.sqrt(newLower);
+        if (nearest != vectorCentroids[i]) {
+          changed = true;
+          upperBounds[i] = (float) Math.sqrt(u2);
+          changeAssignment(i, nearest, centroidSize, vectorCentroids);
+        }
+      }
+      if (changed == false) {
+        break;
+      }
+      int[] furthestMovingCenter = moveCenters(centroids, sumNewCenters, centroidSize);
+      // if we moved tiny, we are converged
+      if (centerMovement[furthestMovingCenter[0]] <= 1e-6) {
+        break;
+      }
+      updateBounds(vectorCentroids, furthestMovingCenter);
+    }
+    return centroids;
   }
 
   /**
@@ -420,6 +555,75 @@ public class KMeans {
     }
     assert Arrays.stream(centroidSize).sum() == vectors.size();
     return sumSquaredDist;
+  }
+
+  void throwAwayAndSplitCentroids2(
+      float[][] centroids,
+      short[] docCentroids,
+      int[] centroidSize,
+      float[] upperBounds,
+      IntArrayList unassignedCentroidsIdxs)
+      throws IOException {
+    IntObjectHashMap<IntArrayList> splitCentroids =
+        new IntObjectHashMap<>(unassignedCentroidsIdxs.size());
+    // used for splitting logic
+    int[] splitSizes = Arrays.copyOf(centroidSize, centroidSize.length);
+    // FAISS style algorithm for splitting
+    for (int i = 0; i < unassignedCentroidsIdxs.size(); i++) {
+      int toSplit;
+      for (toSplit = 0; true; toSplit = (toSplit + 1) % centroidSize.length) {
+        /* probability to pick this cluster for split */
+        double p =
+            (splitSizes[toSplit] - 1.0) / (float) (docCentroids.length - centroidSize.length);
+        float r = random.nextFloat();
+        if (r < p) {
+          break; /* found our cluster to be split */
+        }
+      }
+      int unassignedCentroidIdx = unassignedCentroidsIdxs.get(i);
+      // keep track of those that are split, this way we reassign docCentroids and fix up true size
+      // & centroids
+      splitCentroids.getOrDefault(toSplit, new IntArrayList()).add(unassignedCentroidIdx);
+      System.arraycopy(
+          centroids[toSplit],
+          0,
+          centroids[unassignedCentroidIdx],
+          0,
+          centroids[unassignedCentroidIdx].length);
+      for (int dim = 0; dim < centroids[unassignedCentroidIdx].length; dim++) {
+        if (dim % 2 == 0) {
+          centroids[unassignedCentroidIdx][dim] *= (1 + EPS);
+          centroids[toSplit][dim] *= (1 - EPS);
+        } else {
+          centroids[unassignedCentroidIdx][dim] *= (1 - EPS);
+          centroids[toSplit][dim] *= (1 + EPS);
+        }
+      }
+      splitSizes[unassignedCentroidIdx] = splitSizes[toSplit] / 2;
+      splitSizes[toSplit] -= splitSizes[unassignedCentroidIdx];
+    }
+    // now we need to reassign docCentroids and fix up true size & centroids
+    for (int i = 0; i < docCentroids.length; i++) {
+      int docCentroid = docCentroids[i];
+      IntArrayList split = splitCentroids.get(docCentroid);
+      if (split != null) {
+        // we need to reassign this doc
+        int bestCentroid = docCentroid;
+        float bestDist = VectorUtil.squareDistance(centroids[docCentroid], vectors.vectorValue(i));
+        for (int j = 0; j < split.size(); j++) {
+          int newCentroid = split.get(j);
+          float dist = VectorUtil.squareDistance(centroids[newCentroid], vectors.vectorValue(i));
+          if (dist < bestDist) {
+            bestCentroid = newCentroid;
+            bestDist = dist;
+          }
+        }
+        if (bestCentroid != docCentroid) {
+          changeAssignment(i, (short) bestCentroid, centroidSize, docCentroids);
+          upperBounds[i] = (float) Math.sqrt(bestDist);
+        }
+      }
+    }
   }
 
   void throwAwayAndSplitCentroids(

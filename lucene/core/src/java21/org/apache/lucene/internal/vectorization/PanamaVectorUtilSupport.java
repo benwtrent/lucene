@@ -1203,6 +1203,24 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
     }
   }
 
+  public void add(float[] v1, float[] v2, float[] result) {
+    assert v1.length == v2.length;
+    assert v1.length == result.length;
+    int i = 0;
+    if (v1.length > 2 * FLOAT_SPECIES.length()) {
+      for (; i < FLOAT_SPECIES.loopBound(v1.length); i += FLOAT_SPECIES.length()) {
+        FloatVector v1Vec = FloatVector.fromArray(FLOAT_SPECIES, v1, i);
+        FloatVector v2Vec = FloatVector.fromArray(FLOAT_SPECIES, v2, i);
+        FloatVector addVec = v1Vec.add(v2Vec);
+        addVec.intoArray(result, i);
+      }
+    }
+    // tail
+    for (; i < v1.length; i++) {
+      result[i] = v1[i] + v2[i];
+    }
+  }
+
   @Override
   public float soarResidual(float[] v1, float[] centroid, float[] originalResidual) {
     assert v1.length == centroid.length;
