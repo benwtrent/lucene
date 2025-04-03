@@ -89,8 +89,10 @@ public class TestOSQVectorsScorer extends BaseVectorizationTestCase {
                 LUCENE_PROVIDER.newOSQVectorsScorer(slice, dimensions);
             final OSQVectorsScorer panamaScorer =
                 PANAMA_PROVIDER.newOSQVectorsScorer(in, dimensions);
-            defaultScorer.scoreBulk(query, result, similarityFunction, centroidDp, scores1);
-            panamaScorer.scoreBulk(query, result, similarityFunction, centroidDp, scores2);
+            defaultScorer.scoreBulk(
+                query, result, similarityFunction, centroidDp, scores1.length, scores1);
+            panamaScorer.scoreBulk(
+                query, result, similarityFunction, centroidDp, scores1.length, scores2);
             assertArrayEquals(scores1, scores2, 1e-2f);
             assertEquals(
                 ((long) (OSQVectorsScorer.BULK_SIZE) * (length + 14)), slice.getFilePointer());

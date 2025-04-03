@@ -83,6 +83,7 @@ public class OSQVectorsScorer {
    * determined by {code count} and the results are stored in the provided {@code scores} array.
    */
   public void quantizeScoreBulk(byte[] q, int count, float[] scores) throws IOException {
+    assert scores.length >= count;
     for (int i = 0; i < count; i++) {
       scores[i] = quantizeScore(q);
     }
@@ -143,16 +144,25 @@ public class OSQVectorsScorer {
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
       float centroidDp,
+      int size,
       float[] scores)
       throws IOException {
-    quantizeScoreBulk(q, BULK_SIZE, scores);
-    in.readFloats(lowerIntervals, 0, BULK_SIZE);
-    in.readFloats(upperIntervals, 0, BULK_SIZE);
-    for (int i = 0; i < BULK_SIZE; i++) {
+    if (size > BULK_SIZE) {
+      throw new IllegalArgumentException(
+          "The provided size is too large: " + size + " > " + BULK_SIZE);
+    }
+    if (scores.length < size) {
+      throw new IllegalArgumentException(
+          "The provided scores array is too small: " + scores.length + " < " + size);
+    }
+    quantizeScoreBulk(q, size, scores);
+    in.readFloats(lowerIntervals, 0, size);
+    in.readFloats(upperIntervals, 0, size);
+    for (int i = 0; i < size; i++) {
       targetComponentSums[i] = Short.toUnsignedInt(in.readShort());
     }
-    in.readFloats(additionalCorrections, 0, BULK_SIZE);
-    for (int i = 0; i < BULK_SIZE; i++) {
+    in.readFloats(additionalCorrections, 0, size);
+    for (int i = 0; i < size; i++) {
       scores[i] =
           score(
               queryCorrections,

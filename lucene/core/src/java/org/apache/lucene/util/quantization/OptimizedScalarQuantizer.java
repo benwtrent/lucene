@@ -324,6 +324,10 @@ public class OptimizedScalarQuantizer {
    * @param packed the packed vector
    */
   public static void packAsBinary(byte[] vector, byte[] packed) {
+    packAsBinary(vector, packed, 0);
+  }
+
+  public static void packAsBinary(byte[] vector, byte[] packed, int destOffset) {
     for (int i = 0; i < vector.length; ) {
       byte result = 0;
       for (int j = 7; j >= 0 && i < vector.length; j--) {
@@ -332,8 +336,8 @@ public class OptimizedScalarQuantizer {
         ++i;
       }
       int index = ((i + 7) / 8) - 1;
-      assert index < packed.length;
-      packed[index] = result;
+      assert index + destOffset < packed.length;
+      packed[destOffset + index] = result;
     }
   }
 

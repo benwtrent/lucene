@@ -9,25 +9,40 @@ package org.apache.lucene.sandbox.codecs.quantization;
 import java.io.IOException;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 
 public class IVFUtils {
 
-  public interface CentroidQueryScorer {
-    int size();
+  public interface IntIterator {
+    int pop() throws IOException;
 
+    boolean hasNext() throws IOException;
+  }
+
+  public interface CentroidQueryScorer {
     float[] centroid(int centroidOrdinal) throws IOException;
 
-    float score(int centroidOrdinal) throws IOException;
+    IntIterator centroidIterator() throws IOException;
+  }
+
+  public interface CentroidAssignmentDistanceEstimator {
+    NeighborQueue estimateNearestCentroids(int vectorOrd, int k) throws IOException;
   }
 
   public interface CentroidAssignmentScorer {
     int size();
 
     float[] centroid(int centroidOrdinal) throws IOException;
+
+    default CentroidAssignmentDistanceEstimator getEstimator(FloatVectorValues vectorValues)
+        throws IOException {
+      return null;
+    }
 
     void setScoringVector(float[] vector);
 

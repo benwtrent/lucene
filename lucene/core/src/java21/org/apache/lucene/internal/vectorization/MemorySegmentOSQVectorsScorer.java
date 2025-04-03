@@ -195,25 +195,27 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
   }
 
   private void quantizeScore128Bulk(byte[] q, int count, float[] scores) throws IOException {
+    final int limit = ByteVector.SPECIES_128.loopBound(length);
     for (int iter = 0; iter < count; iter++) {
+      long offset = in.getFilePointer();
       long subRet0 = 0;
       long subRet1 = 0;
       long subRet2 = 0;
       long subRet3 = 0;
       int i = 0;
-      long offset = in.getFilePointer();
 
       var sum0 = IntVector.zero(INT_SPECIES_128);
       var sum1 = IntVector.zero(INT_SPECIES_128);
       var sum2 = IntVector.zero(INT_SPECIES_128);
       var sum3 = IntVector.zero(INT_SPECIES_128);
-      int limit = ByteVector.SPECIES_128.loopBound(length);
-      for (;
-          i < limit;
-          i += ByteVector.SPECIES_128.length(), offset += INT_SPECIES_128.vectorByteSize()) {
+      for (; i < limit; i += ByteVector.SPECIES_128.length()) {
         var vd =
-            IntVector.fromMemorySegment(
-                INT_SPECIES_128, memorySegment, offset, ByteOrder.LITTLE_ENDIAN);
+            ByteVector.fromMemorySegment(
+                    BYTE_SPECIES_128,
+                    memorySegment,
+                    (long) i * iter + offset,
+                    ByteOrder.LITTLE_ENDIAN)
+                .reinterpretAsInts();
         var vq0 = ByteVector.fromArray(BYTE_SPECIES_128, q, i).reinterpretAsInts();
         var vq1 = ByteVector.fromArray(BYTE_SPECIES_128, q, i + length).reinterpretAsInts();
         var vq2 = ByteVector.fromArray(BYTE_SPECIES_128, q, i + length * 2).reinterpretAsInts();
@@ -228,7 +230,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
       subRet2 += sum2.reduceLanes(VectorOperators.ADD);
       subRet3 += sum3.reduceLanes(VectorOperators.ADD);
       // tail as bytes
-      in.seek(offset);
+      in.seek(offset + (long) iter * length);
       for (; i < length; i++) {
         int dValue = in.readByte() & 0xFF;
         subRet0 += Integer.bitCount((dValue & q[i]) & 0xFF);
@@ -320,20 +322,22 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
       float centroidDp,
+      int size,
       float[] scores)
       throws IOException {
     assert q.length == length * 4;
+    assert scores.length >= size;
     // 128 / 8 == 16
     if (length >= 16 && PanamaVectorConstants.HAS_FAST_INTEGER_VECTORS) {
       if (PanamaVectorUtilSupport.VECTOR_BITSIZE >= 256) {
-        score256Bulk(q, queryCorrections, similarityFunction, centroidDp, scores);
+        score256Bulk(q, queryCorrections, similarityFunction, centroidDp, size, scores);
         return;
       } else if (PanamaVectorUtilSupport.VECTOR_BITSIZE == 128) {
-        score128Bulk(q, queryCorrections, similarityFunction, centroidDp, scores);
+        score128Bulk(q, queryCorrections, similarityFunction, centroidDp, size, scores);
         return;
       }
     }
-    super.scoreBulk(q, queryCorrections, similarityFunction, centroidDp, scores);
+    super.scoreBulk(q, queryCorrections, similarityFunction, centroidDp, size, scores);
   }
 
   private void score128Bulk(
@@ -341,10 +345,11 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
       float centroidDp,
+      int size,
       float[] scores)
       throws IOException {
-    quantizeScore128Bulk(q, BULK_SIZE, scores);
-    int limit = FLOAT_SPECIES_128.loopBound(BULK_SIZE);
+    quantizeScore128Bulk(q, size, scores);
+    int limit = FLOAT_SPECIES_128.loopBound(size);
     int i = 0;
     long offset = in.getFilePointer();
     float ay = queryCorrections.lowerInterval();
@@ -358,14 +363,14 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
           FloatVector.fromMemorySegment(
                   FLOAT_SPECIES_128,
                   memorySegment,
-                  offset + 4 * BULK_SIZE + i * Float.BYTES,
+                  offset + 4 * size + i * Float.BYTES,
                   ByteOrder.LITTLE_ENDIAN)
               .sub(ax);
       var targetComponentSums =
           ShortVector.fromMemorySegment(
                   SHORT_SPECIES_128,
                   memorySegment,
-                  offset + 8 * BULK_SIZE + i * Short.BYTES,
+                  offset + 8 * size + i * Short.BYTES,
                   ByteOrder.LITTLE_ENDIAN)
               .convert(VectorOperators.S2I, 0)
               .reinterpretAsInts()
@@ -375,7 +380,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
           FloatVector.fromMemorySegment(
               FLOAT_SPECIES_128,
               memorySegment,
-              offset + 10 * BULK_SIZE + i * Float.BYTES,
+              offset + 10 * size + i * Float.BYTES,
               ByteOrder.LITTLE_ENDIAN);
       var qcDist = FloatVector.fromArray(FLOAT_SPECIES_128, scores, i);
       // ax * ay * dimensions + ay * lx * (float) targetComponentSum + ax * ly * y1 + lx * ly *
@@ -414,7 +419,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
         }
       }
     }
-    in.seek(offset + 14L * BULK_SIZE);
+    in.seek(offset + 14L * size);
   }
 
   private void score256Bulk(
@@ -422,10 +427,11 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
       float centroidDp,
+      int size,
       float[] scores)
       throws IOException {
-    quantizeScore256Bulk(q, BULK_SIZE, scores);
-    int limit = FLOAT_SPECIES_256.loopBound(BULK_SIZE);
+    quantizeScore256Bulk(q, size, scores);
+    int limit = FLOAT_SPECIES_256.loopBound(size);
     int i = 0;
     long offset = in.getFilePointer();
     float ay = queryCorrections.lowerInterval();
@@ -439,14 +445,14 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
           FloatVector.fromMemorySegment(
                   FLOAT_SPECIES_256,
                   memorySegment,
-                  offset + 4 * BULK_SIZE + i * Float.BYTES,
+                  offset + 4 * size + i * Float.BYTES,
                   ByteOrder.LITTLE_ENDIAN)
               .sub(ax);
       var targetComponentSums =
           ShortVector.fromMemorySegment(
                   SHORT_SPECIES_256,
                   memorySegment,
-                  offset + 8 * BULK_SIZE + i * Short.BYTES,
+                  offset + 8 * size + i * Short.BYTES,
                   ByteOrder.LITTLE_ENDIAN)
               .convert(VectorOperators.S2I, 0)
               .reinterpretAsInts()
@@ -456,7 +462,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
           FloatVector.fromMemorySegment(
               FLOAT_SPECIES_256,
               memorySegment,
-              offset + 10 * BULK_SIZE + i * Float.BYTES,
+              offset + 10 * size + i * Float.BYTES,
               ByteOrder.LITTLE_ENDIAN);
       var qcDist = FloatVector.fromArray(FLOAT_SPECIES_256, scores, i);
       // ax * ay * dimensions + ay * lx * (float) targetComponentSum + ax * ly * y1 + lx * ly *
@@ -495,6 +501,6 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
         }
       }
     }
-    in.seek(offset + 14L * BULK_SIZE);
+    in.seek(offset + 14L * size);
   }
 }

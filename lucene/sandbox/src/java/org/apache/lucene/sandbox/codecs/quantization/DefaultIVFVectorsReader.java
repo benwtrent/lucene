@@ -60,58 +60,20 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     float globalCentroidDp = fieldEntry.globalCentroidDp();
     OptimizedScalarQuantizer scalarQuantizer =
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
-    byte[] quantized = new byte[targetQuery.length];
+    byte[] quantizedScratch = new byte[targetQuery.length];
     float[] targetScratch = ArrayUtil.copyArray(targetQuery);
     OptimizedScalarQuantizer.QuantizationResult queryParams =
-        scalarQuantizer.scalarQuantize(targetScratch, quantized, (byte) 4, globalCentroid);
-    return new IVFUtils.CentroidQueryScorer() {
-      int currentCentroid = -1;
-      private final byte[] quantizedCentroid = new byte[fieldInfo.getVectorDimension()];
-      private final float[] centroid = new float[fieldInfo.getVectorDimension()];
-      private final float[] centroidCorrectiveValues = new float[3];
-      private int quantizedCentroidComponentSum;
-      private final long centroidByteSize =
-          IVFUtils.calculateByteLength(fieldInfo.getVectorDimension(), (byte) 4);
-
-      @Override
-      public int size() {
-        return numCentroids;
-      }
-
-      @Override
-      public float[] centroid(int centroidOrdinal) throws IOException {
-        readQuantizedCentroid(centroidOrdinal);
-        return centroid;
-      }
-
-      private void readQuantizedCentroid(int centroidOrdinal) throws IOException {
-        if (centroidOrdinal == currentCentroid) {
-          return;
-        }
-        centroids.seek(centroidOrdinal * centroidByteSize);
-        quantizedCentroidComponentSum =
-            IVFUtils.readQuantizedValue(centroids, quantizedCentroid, centroidCorrectiveValues);
-        centroids.seek(
-            numCentroids * centroidByteSize
-                + (long) Float.BYTES * quantizedCentroid.length * centroidOrdinal);
-        centroids.readFloats(centroid, 0, centroid.length);
-        currentCentroid = centroidOrdinal;
-      }
-
-      @Override
-      public float score(int centroidOrdinal) throws IOException {
-        readQuantizedCentroid(centroidOrdinal);
-        return int4QuantizedScore(
-            quantized,
-            queryParams,
-            fieldInfo.getVectorDimension(),
-            quantizedCentroid,
-            centroidCorrectiveValues,
-            quantizedCentroidComponentSum,
-            globalCentroidDp,
-            fieldInfo.getVectorSimilarityFunction());
-      }
-    };
+        scalarQuantizer.scalarQuantize(targetScratch, quantizedScratch, (byte) 4, globalCentroid);
+    byte[] quantized = new byte[discretize(fieldInfo.getVectorDimension(), 64) / 2];
+    OptimizedScalarQuantizer.transposeHalfByte(quantizedScratch, quantized);
+    return new BulkQuantizedCentroidQueryScorer(
+        numCentroids,
+        fieldInfo.getVectorSimilarityFunction(),
+        centroids,
+        globalCentroidDp,
+        targetQuery,
+        quantized,
+        queryParams);
   }
 
   @Override
@@ -126,7 +88,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   @Override
-  protected NeighborQueue scorePostingLists(
+  protected IVFUtils.IntIterator scorePostingLists(
       FieldInfo fieldInfo,
       KnnCollector knnCollector,
       IVFUtils.CentroidQueryScorer centroidQueryScorer,
@@ -137,13 +99,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         throw new IllegalArgumentException("preferred centroids not yet supported");
       }
     }
-
-    NeighborQueue neighborQueue = new NeighborQueue(centroidQueryScorer.size(), true);
-    // TODO Off heap scoring for quantized centroids?
-    for (int centroid = 0; centroid < centroidQueryScorer.size(); centroid++) {
-      neighborQueue.add(centroid, centroidQueryScorer.score(centroid));
-    }
-    return neighborQueue;
+    return centroidQueryScorer.centroidIterator();
   }
 
   static void prefixSum(int[] buffer, int count) {
@@ -158,6 +114,150 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       throws IOException {
     FieldEntry entry = fields.get(fieldInfo.number);
     return new MemorySegmentPostingsVisitor(target, indexInput, entry, fieldInfo, needsScoring);
+  }
+
+  static class BulkQuantizedCentroidQueryScorer implements IVFUtils.CentroidQueryScorer {
+    final int centroidCount;
+    final IndexInput centroids;
+    final float globalCentroidDp;
+    final float[] centroid;
+    int currentCentroid = -1;
+    final float[] targetQuery;
+    final byte[] quantizedTargetQuery;
+    final OptimizedScalarQuantizer.QuantizationResult targetQueryCorrections;
+    final int bulkCentroidLoopBound;
+    final int centroidByteSize;
+    final VectorSimilarityFunction vectorSimilarityFunction;
+
+    BulkQuantizedCentroidQueryScorer(
+        int centroidCount,
+        VectorSimilarityFunction vectorSimilarityFunction,
+        IndexInput centroids,
+        float globalCentroidDp,
+        float[] targetQuery,
+        byte[] quantizedTargetQuery,
+        OptimizedScalarQuantizer.QuantizationResult targetQueryCorrections) {
+      this.vectorSimilarityFunction = vectorSimilarityFunction;
+      this.centroidCount = centroidCount;
+      this.centroids = centroids;
+      this.globalCentroidDp = globalCentroidDp;
+      this.targetQuery = targetQuery;
+      this.quantizedTargetQuery = quantizedTargetQuery;
+      this.targetQueryCorrections = targetQueryCorrections;
+      this.bulkCentroidLoopBound =
+          centroidCount - Math.floorMod(centroidCount, OSQVectorsScorer.BULK_SIZE);
+      this.centroidByteSize = IVFUtils.calculateByteLength(targetQuery.length, (byte) 1);
+      this.centroid = new float[targetQuery.length];
+    }
+
+    @Override
+    public float[] centroid(int centroidOrdinal) throws IOException {
+      if (centroidOrdinal == currentCentroid) {
+        return centroid;
+      }
+      centroids.seek(
+          (long) centroidCount * centroidByteSize
+              + (long) Float.BYTES * targetQuery.length * centroidOrdinal);
+      centroids.readFloats(centroid, 0, centroid.length);
+      currentCentroid = centroidOrdinal;
+      return centroid;
+    }
+
+    @Override
+    public IVFUtils.IntIterator centroidIterator() throws IOException {
+      NeighborQueue neighborQueue = new NeighborQueue(centroidCount, true);
+      OSQVectorsScorer osqScorer =
+          VECTORIZATION_PROVIDER.newOSQVectorsScorer(centroids, targetQuery.length);
+      // iterate centroids and score by BULK_SIZE
+      int centroidIdx = 0;
+      float[] scores = new float[OSQVectorsScorer.BULK_SIZE];
+      for (; centroidIdx < bulkCentroidLoopBound; centroidIdx += OSQVectorsScorer.BULK_SIZE) {
+        osqScorer.scoreBulk(
+            quantizedTargetQuery,
+            targetQueryCorrections,
+            vectorSimilarityFunction,
+            globalCentroidDp,
+            OSQVectorsScorer.BULK_SIZE,
+            scores);
+        for (int i = 0; i < OSQVectorsScorer.BULK_SIZE; i++) {
+          neighborQueue.add(centroidIdx + i, scores[i]);
+        }
+      }
+      int centroidsLeft = centroidCount - centroidIdx;
+      if (centroidsLeft > 0) {
+        osqScorer.scoreBulk(
+            quantizedTargetQuery,
+            targetQueryCorrections,
+            vectorSimilarityFunction,
+            globalCentroidDp,
+            centroidsLeft,
+            scores);
+        for (int i = 0; i < centroidsLeft; i++) {
+          neighborQueue.add(centroidIdx + i, scores[i]);
+        }
+      }
+      IndexInput unquantizedCentroids =
+          centroids.slice(
+              "unquantizedCentroids",
+              (long) centroidCount * IVFUtils.calculateByteLength(targetQuery.length, (byte) 1),
+              (long) centroidCount * targetQuery.length * Float.BYTES);
+      return new BulkEstimateIterator(
+          vectorSimilarityFunction, targetQuery, neighborQueue, unquantizedCentroids);
+    }
+  }
+
+  static class BulkEstimateIterator implements IVFUtils.IntIterator {
+    final NeighborQueue centroidScoreEstimates;
+    final IndexInput centroids;
+    final NeighborQueue trueCentroidScores;
+    final float[] targetQuery;
+    final float[] unquantizedCentroid;
+    final VectorSimilarityFunction vectorSimilarityFunction;
+
+    BulkEstimateIterator(
+        VectorSimilarityFunction vectorSimilarityFunction,
+        float[] targetQuery,
+        NeighborQueue centroidScoreEstimates,
+        IndexInput centroids) {
+      this.centroidScoreEstimates = centroidScoreEstimates;
+      this.centroids = centroids;
+      // rescore the next 5 at a time
+      this.trueCentroidScores = new NeighborQueue(5, true);
+      this.vectorSimilarityFunction = vectorSimilarityFunction;
+      this.targetQuery = targetQuery;
+      this.unquantizedCentroid = new float[targetQuery.length];
+    }
+
+    @Override
+    public int pop() throws IOException {
+      if (trueCentroidScores.size() == 0) {
+        rescoreNextBatch();
+      }
+      return trueCentroidScores.pop();
+    }
+
+    @Override
+    public boolean hasNext() throws IOException {
+      return trueCentroidScores.size() > 0 || centroidScoreEstimates.size() > 0;
+    }
+
+    private float scoreCentroid(long ord) throws IOException {
+      centroids.seek(ord * targetQuery.length * Float.BYTES);
+      centroids.readFloats(unquantizedCentroid, 0, unquantizedCentroid.length);
+      return vectorSimilarityFunction.compare(targetQuery, unquantizedCentroid);
+    }
+
+    private void rescoreNextBatch() throws IOException {
+      assert trueCentroidScores.size() == 0;
+      int centroidCount = Math.min(5, centroidScoreEstimates.size());
+      int i = 0;
+      while (i < centroidCount) {
+        int centroidOrdinal = centroidScoreEstimates.pop();
+        float score = scoreCentroid(centroidOrdinal);
+        trueCentroidScores.add(centroidOrdinal, score);
+        i++;
+      }
+    }
   }
 
   // TODO can we do this in off-heap blocks?
@@ -206,7 +306,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       this.input = input;
       this.dimension = dimension;
       this.centroid = new float[dimension];
-      this.centroidByteSize = IVFUtils.calculateByteLength(dimension, (byte) 4);
+      this.centroidByteSize = IVFUtils.calculateByteLength(dimension, (byte) 1);
     }
 
     @Override

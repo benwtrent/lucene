@@ -33,7 +33,6 @@ import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.hnsw.NeighborQueue;
 
 /**
  * @lucene.experimental
@@ -288,7 +287,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     if (centroidsToSearch <= 0) {
       centroidsToSearch = Math.max(((knnCollector.k() * 300) / 1_000), 1);
     }
-    final NeighborQueue centroidQueue =
+    final IVFUtils.IntIterator centroidQueue =
         scorePostingLists(fieldInfo, knnCollector, centroidQueryScorer, nProbe);
     IVFUtils.PostingVisitor scorer =
         getPostingVisitor(fieldInfo, ivfClusters, target, needsScoring);
@@ -296,7 +295,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     long expectedDocs = 0;
     long actualDocs = 0;
     // initially we visit only the "centroids to search"
-    while (centroidQueue.size() > 0 && centroidsVisited < centroidsToSearch) {
+    while (centroidQueue.hasNext() && centroidsVisited < centroidsToSearch) {
       ++centroidsVisited;
       // todo do we actually need to know the score???
       int centroidOrdinal = centroidQueue.pop();
@@ -313,7 +312,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     // so continue exploring past centroidsToSearch until we reach the expected number of documents
     // TODO, can we pick something smarter than 0.9? Something related to average posting list size?
     float expectedScored = expectedDocs * 0.9f;
-    while (acceptDocs != null && centroidQueue.size() > 0 && actualDocs < expectedScored) {
+    while (acceptDocs != null && centroidQueue.hasNext() && actualDocs < expectedScored) {
       int centroidOrdinal = centroidQueue.pop();
       scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
       actualDocs += scorer.visit(knnCollector);
@@ -338,7 +337,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
   }
 
-  abstract NeighborQueue scorePostingLists(
+  abstract IVFUtils.IntIterator scorePostingLists(
       FieldInfo fieldInfo,
       KnnCollector knnCollector,
       IVFUtils.CentroidQueryScorer centroidQueryScorer,
