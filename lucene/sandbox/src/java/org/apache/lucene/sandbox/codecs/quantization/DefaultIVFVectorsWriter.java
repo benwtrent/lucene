@@ -19,6 +19,7 @@ import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.NeighborQueue;
+import org.apache.lucene.util.hnsw.RandomVectorScorer;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 
 import java.io.IOException;
@@ -27,8 +28,12 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.INDEX_BITS;
 import static org.apache.lucene.sandbox.codecs.quantization.IVFVectorsFormat.IVF_VECTOR_COMPONENT;
@@ -49,20 +54,13 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
   private final int vectorPerCluster;
 
-  public DefaultIVFVectorsWriter(
-      SegmentWriteState state, FlatVectorsWriter rawVectorDelegate, int vectorPerCluster)
-      throws IOException {
+  public DefaultIVFVectorsWriter(SegmentWriteState state, FlatVectorsWriter rawVectorDelegate, int vectorPerCluster) throws IOException {
     super(state, rawVectorDelegate);
     this.vectorPerCluster = vectorPerCluster;
   }
 
   @Override
-  protected IVFUtils.CentroidAssignmentScorer calculateAndWriteCentroids(
-      FieldInfo fieldInfo,
-      FloatVectorValues floatVectorValues,
-      IndexOutput centroidOutput,
-      float[] globalCentroid)
-      throws IOException {
+  protected IVFUtils.CentroidAssignmentScorer calculateAndWriteCentroids(FieldInfo fieldInfo, FloatVectorValues floatVectorValues, IndexOutput centroidOutput, float[] globalCentroid) throws IOException {
     if (floatVectorValues.size() == 0) {
       return new IVFUtils.CentroidAssignmentScorer() {
         @Override
@@ -88,41 +86,22 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     }
     // calculate the centroids
     int maxNumClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
-    int desiredClusters =
-        (int)
-            Math.max(
-                maxNumClusters / 16.0,
-                Math.max(Math.sqrt(floatVectorValues.size()), maxNumClusters));
+    int desiredClusters = (int) Math.max(maxNumClusters / 16.0, Math.max(Math.sqrt(floatVectorValues.size()), maxNumClusters));
     if (floatVectorValues.size() / desiredClusters > vectorPerCluster) {
       desiredClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
     }
-    final KMeans.Results kMeans =
-        KMeans.cluster(
-            floatVectorValues,
-            desiredClusters,
-            false,
-            42L,
-            KMeans.KmeansInitializationMethod.PLUS_PLUS,
-            null,
-            fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
-            1,
-            DEFAULT_ITRS,
-            desiredClusters * 256);
+    final KMeans.Results kMeans = KMeans.cluster(floatVectorValues, desiredClusters, false, 42L, KMeans.KmeansInitializationMethod.PLUS_PLUS, null, fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE, 1, DEFAULT_ITRS, desiredClusters * 256);
     float[][] centroids = kMeans.centroids();
     // write them
-    OptimizedScalarQuantizer osq =
-        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    OptimizedScalarQuantizer osq = new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
     byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
     for (float[] centroid : centroids) {
       System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
-      OptimizedScalarQuantizer.QuantizationResult quantizedCentroidResults =
-          osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+      OptimizedScalarQuantizer.QuantizationResult quantizedCentroidResults = osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
       IVFUtils.writeQuantizedValue(centroidOutput, quantizedScratch, quantizedCentroidResults);
     }
-    final ByteBuffer buffer =
-        ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
-            .order(ByteOrder.LITTLE_ENDIAN);
+    final ByteBuffer buffer = ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
     for (float[] centroid : centroids) {
       buffer.asFloatBuffer().put(centroid);
       centroidOutput.writeBytes(buffer.array(), buffer.array().length);
@@ -131,13 +110,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected long[][] buildAndWritePostingsLists(
-      FieldInfo fieldInfo,
-      InfoStream infoStream,
-      IVFUtils.CentroidAssignmentScorer randomCentroidScorer,
-      FloatVectorValues floatVectorValues,
-      IndexOutput postingsOutput)
-      throws IOException {
+  protected long[][] buildAndWritePostingsLists(FieldInfo fieldInfo, InfoStream infoStream, IVFUtils.CentroidAssignmentScorer randomCentroidScorer, FloatVectorValues floatVectorValues, IndexOutput postingsOutput) throws IOException {
     IntArrayList[] clusters = new IntArrayList[randomCentroidScorer.size()];
     for (int i = 0; i < randomCentroidScorer.size(); i++) {
       clusters[i] = new IntArrayList(floatVectorValues.size() / randomCentroidScorer.size() / 4);
@@ -148,10 +121,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     }
     // write the posting lists
     final long[][] offsetsAndLengths = new long[randomCentroidScorer.size()][];
-    OptimizedScalarQuantizer quantizer =
-        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
-    BinarizedFloatVectorValues binarizedByteVectorValues =
-        new BinarizedFloatVectorValues(floatVectorValues, quantizer);
+    OptimizedScalarQuantizer quantizer = new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    BinarizedFloatVectorValues binarizedByteVectorValues = new BinarizedFloatVectorValues(floatVectorValues, quantizer);
     int[] docIdBuffer = new int[floatVectorValues.size() / randomCentroidScorer.size()];
     for (int i = 0; i < randomCentroidScorer.size(); i++) {
       float[] centroid = randomCentroidScorer.centroid(i);
@@ -165,8 +136,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       postingsOutput.writeInt(Float.floatToIntBits(VectorUtil.dotProduct(centroid, centroid)));
       // varint encode the docIds
       int lastDocId = -1;
-      docIdBuffer =
-          size > docIdBuffer.length ? ArrayUtil.growExact(docIdBuffer, size) : docIdBuffer;
+      docIdBuffer = size > docIdBuffer.length ? ArrayUtil.growExact(docIdBuffer, size) : docIdBuffer;
       for (int j = 0; j < size; j++) {
         int docId = floatVectorValues.ordToDoc(cluster.get(j));
         assert lastDocId < 0 || docId >= lastDocId;
@@ -185,8 +155,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         int ord = cluster.get(cidx);
         // write vector
         byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
-        OptimizedScalarQuantizer.QuantizationResult corrections =
-            binarizedByteVectorValues.getCorrectiveTerms(ord);
+        OptimizedScalarQuantizer.QuantizationResult corrections = binarizedByteVectorValues.getCorrectiveTerms(ord);
         IVFUtils.writeQuantizedValue(postingsOutput, binaryValue, corrections);
       }
       offsetsAndLengths[i][1] = postingsOutput.getFilePointer() - offsetsAndLengths[i][0];
@@ -195,17 +164,12 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected IVFUtils.CentroidAssignmentScorer createCentroidScorer(
-      IndexInput centroidsInput, int numCentroids, FieldInfo fieldInfo, float[] globalCentroid)
-      throws IOException {
+  protected IVFUtils.CentroidAssignmentScorer createCentroidScorer(IndexInput centroidsInput, int numCentroids, FieldInfo fieldInfo, float[] globalCentroid) throws IOException {
     return new OffHeapCentroidAssignmentScorer(centroidsInput, numCentroids, fieldInfo);
   }
 
-  record SegmentCentroid(
-    int segment,
-    int centroid,
-    int vectorCount
-  ){}
+  record SegmentCentroid(int segment, int centroid, int vectorCount) {
+  }
 
 //  @Override
 //  protected int calculateAndWriteCentroids(
@@ -492,8 +456,235 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 //    return centroids.length;
 //  }
 
-  @Override
-  protected int calculateAndWriteCentroids(
+@Override
+protected int calculateAndWriteCentroids(
+  FieldInfo fieldInfo,
+  FloatVectorValues floatVectorValues,
+  IndexOutput temporaryCentroidOutput,
+  MergeState mergeState,
+  float[] globalCentroid)
+  throws IOException {
+
+  long nanoTime = System.nanoTime();
+
+  if (floatVectorValues.size() == 0) {
+    return 0;
+  }
+
+  int desiredClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
+
+  // init centroids from merge state
+  List<FloatVectorValues> centroidList = new ArrayList<>();
+  List<SegmentCentroid> segmentCentroids = new ArrayList<>(desiredClusters);
+  Map<Integer, List<SegmentCentroid>> segmentToCentroid = new HashMap<>();
+
+  int segmentIdx = 0;
+  for (var reader : mergeState.knnVectorsReaders) {
+    IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(reader, fieldInfo.name);
+    if (ivfVectorsReader == null) {
+      continue;
+    }
+
+    FloatVectorValues centroid = ivfVectorsReader.getCentroids(fieldInfo);
+    centroidList.add(centroid);
+    List<SegmentCentroid> segmentOnlyCentroids = new ArrayList<>();
+    for (int i = 0; i < centroid.size(); i++) {
+      int size = ivfVectorsReader.centroidSize(fieldInfo.name, i);
+      SegmentCentroid sc = new SegmentCentroid(segmentIdx, i, size);
+      segmentCentroids.add(sc);
+      segmentOnlyCentroids.add(sc);
+    }
+    segmentToCentroid.put(segmentIdx, segmentOnlyCentroids);
+    segmentIdx++;
+  }
+
+  float minimumDistance = Float.MAX_VALUE;
+  float[] vector1 = new float[fieldInfo.getVectorDimension()];
+  float[] vector2 = new float[fieldInfo.getVectorDimension()];
+
+  record SegmentCentroidPair (
+    SegmentCentroid sc1,
+    SegmentCentroid sc2
+  ){}
+
+  Map<SegmentCentroidPair, Float> distanceCache = new HashMap<>();
+
+  // keep track of all inter-centroid distances,
+  for(int i = 0; i < mergeState.knnVectorsReaders.length; i++) {
+    List<SegmentCentroid> segmentOnlyCentroids = segmentToCentroid.get(i);
+    for(int j = 0; j < segmentOnlyCentroids.size(); j++) {
+      SegmentCentroid segmentCentroid = segmentOnlyCentroids.get(j);
+      // FIXME: cache these as well?
+      System.arraycopy(
+        centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid),
+        0,
+        vector1,
+        0,
+        fieldInfo.getVectorDimension());
+      for(int k = j+1; k < segmentOnlyCentroids.size(); k++) {
+          SegmentCentroid toCompare = segmentOnlyCentroids.get(k);
+          System.arraycopy(
+            centroidList.get(toCompare.segment).vectorValue(toCompare.centroid),
+            0,
+            vector2,
+            0,
+            fieldInfo.getVectorDimension());
+        float d = VectorUtil.squareDistance(vector1, vector2);
+        distanceCache.put(new SegmentCentroidPair(segmentCentroid, toCompare), d);
+        if( d < minimumDistance ) {
+          minimumDistance = d;
+        }
+      }
+    }
+  }
+
+  segmentCentroids.sort(Comparator.comparingInt(SegmentCentroid::vectorCount));
+
+  System.out.println(" ==== sc size1: " + segmentCentroids.get(0).vectorCount);
+  System.out.println(" ==== sc size2: " + segmentCentroids.get(1).vectorCount);
+
+  Set<SegmentCentroid> discarded = new HashSet<>();
+
+  // loop from smallest to largest and collect the segment centroids to discard
+  for(int i = 0; i < segmentCentroids.size(); i++) {
+    SegmentCentroid segmentCentroid = segmentCentroids.get(i);
+    for(int j = i+1; j < segmentCentroids.size(); j++) {
+        SegmentCentroid toCompare = segmentCentroids.get(j);
+        Float d = distanceCache.get(new SegmentCentroidPair(segmentCentroid, toCompare));
+        if(d == null) {
+          System.arraycopy(
+            centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid),
+            0,
+            vector1,
+            0,
+            fieldInfo.getVectorDimension());
+          System.arraycopy(
+            centroidList.get(toCompare.segment).vectorValue(toCompare.centroid),
+            0,
+            vector2,
+            0,
+            fieldInfo.getVectorDimension());
+          d = VectorUtil.squareDistance(vector1, vector2);
+        }
+        if( d < minimumDistance ) {
+          discarded.add(segmentCentroid);
+          break;
+        }
+    }
+  }
+
+  // remove
+  int segmentCentroidIdx = 0;
+  while(segmentCentroids.size() - discarded.size() > desiredClusters) {
+    SegmentCentroid segmentCentroid = segmentCentroids.get(segmentCentroidIdx);
+    discarded.add(segmentCentroid);
+    segmentCentroidIdx++;
+  }
+
+  int centroidIdx = 0;
+  float[][] centroids = new float[desiredClusters][];
+  for(int i = 0; i < segmentCentroids.size(); i++) {
+    SegmentCentroid segmentCentroid = segmentCentroids.get(i);
+    if(!discarded.contains(segmentCentroid)) {
+      float[] v = new float[fieldInfo.getVectorDimension()];
+      System.arraycopy(
+        centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid),
+        0,
+        v,
+        0,
+        fieldInfo.getVectorDimension());
+      centroids[centroidIdx++] = v;
+    }
+  }
+
+  // write them
+  OptimizedScalarQuantizer osq =
+    new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+  byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
+  float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
+  for (float[] centroid : centroids) {
+    System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
+    OptimizedScalarQuantizer.QuantizationResult result =
+      osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+    IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
+  }
+  final ByteBuffer buffer =
+    ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
+      .order(ByteOrder.LITTLE_ENDIAN);
+  for (float[] centroid : centroids) {
+    buffer.asFloatBuffer().put(centroid);
+    temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
+  }
+
+  if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+    mergeState.infoStream.message(
+      IVF_VECTOR_COMPONENT, "centroid merge time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
+  }
+
+  return centroids.length;
+}
+
+//  @Override
+  protected int calculateAndWriteCentroidsFull(
+    FieldInfo fieldInfo,
+    FloatVectorValues floatVectorValues,
+    IndexOutput temporaryCentroidOutput,
+    MergeState mergeState,
+    float[] globalCentroid)
+    throws IOException {
+
+    long nanoTime = System.nanoTime();
+
+    if (floatVectorValues.size() == 0) {
+      return 0;
+    }
+
+    int desiredClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
+
+    float[][] centroids;
+    final KMeans.Results kMeans =
+      KMeans.cluster(
+        floatVectorValues,
+        desiredClusters,
+        false,
+        42L,
+        KMeans.KmeansInitializationMethod.PLUS_PLUS,
+        null,
+        fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
+        1,
+        3000,
+        floatVectorValues.size());
+    centroids = kMeans.centroids();
+
+    // write them
+    OptimizedScalarQuantizer osq =
+      new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
+    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
+    for (float[] centroid : centroids) {
+      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
+      OptimizedScalarQuantizer.QuantizationResult result =
+        osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+      IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
+    }
+    final ByteBuffer buffer =
+      ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
+        .order(ByteOrder.LITTLE_ENDIAN);
+    for (float[] centroid : centroids) {
+      buffer.asFloatBuffer().put(centroid);
+      temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
+    }
+
+    if (mergeState.infoStream.isEnabled(IVF_VECTOR_COMPONENT)) {
+      mergeState.infoStream.message(
+        IVF_VECTOR_COMPONENT, "centroid merge time ms: " + ((System.nanoTime() - nanoTime) / 1000000.0));
+    }
+
+    return centroids.length;
+  }
+
+//  @Override
+  protected int calculateAndWriteCentroidsOld(
     FieldInfo fieldInfo,
     FloatVectorValues floatVectorValues,
     IndexOutput temporaryCentroidOutput,
@@ -534,6 +725,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
     // FIXME: may want to have a cache that's fixed in size and dump some of the scores
     //  if we don't need them for the subsequent step and recompute if needed
+
+    // FIXME: only do this across segments not for all centroids
 
     // keep track of all inter-centroid distances,
     float[][] scores = new float[segmentCentroids.size()][segmentCentroids.size()];
@@ -669,6 +862,140 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     System.out.println(centroidIdx);
     System.out.println(Arrays.toString(centroids[0]));
     System.out.println(Arrays.toString(centroids[centroids.length - 1]));
+
+    // FIXME: so the problem is that if we randomly pick some vectors and move the centroid
+    //  then other non-picked vectors will no longer be correctly associated with their centroid
+    //  so the agglom centroid that we painstakingly kept track of no longer has the correctly
+    //  associated vector and in reality it doesn't anyway right
+    //  the vectors after the agglom algo are now associated with a centroid
+    //  that may not make sense for them any longer ... which is why a full kmeans step
+    //  seems to do so well
+
+    // FIXME: I need to know which vectors are assigned to which centroids prior to the merge
+    //  occurring to make it anymore efficient than just the assignCentroids already
+
+    // we are going to try to find the best centroid to represent this vector
+    // ... need to be able to move the centroid around while doing this??? ... hmm
+    // FIXME: first just check if a vector gets assigned to each of the clusters or not
+    float[] centroid1 = new float[fieldInfo.getVectorDimension()];
+    float[] vector = new float[fieldInfo.getVectorDimension()];
+    boolean[] isAssigned = new boolean[centroids.length];
+    for(int i = 0; i < floatVectorValues.size(); i++) {
+      System.arraycopy(
+        floatVectorValues.vectorValue(i),
+        0,
+        vector,
+        0,
+        fieldInfo.getVectorDimension());
+      float smallest = Float.MAX_VALUE;
+      int smallestK = 0;
+      int k = 0;
+      for(int j = 0; j < labels.length; j++) {
+        if(labels[j] == (j+1)) {
+          SegmentCentroid segmentCentroid = segmentCentroids.get(j);
+          System.arraycopy(
+            centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid),
+            0,
+            centroid1,
+            0,
+            fieldInfo.getVectorDimension());
+          float d = VectorUtil.squareDistance(vector, centroid1);
+          if(d < smallest) {
+            smallest = d;
+            smallestK = k;
+          }
+          k++;
+        }
+      }
+      System.out.println(" === k: " + smallestK);
+      isAssigned[smallestK] = true;
+    }
+
+    int totalNotAssigned = 0;
+    for(int i = 0; i < isAssigned.length; i++) {
+      if(!isAssigned[i]) {
+        totalNotAssigned++;
+      }
+    }
+
+    System.out.println(" === tna: " + totalNotAssigned);
+    System.exit(-1);
+
+    // FIXME: this is kinda like a neural gas algo (this is not what we are doing right now it's an idea for how to optimize all of this)
+    //    seed the space with all centroids
+    //    for some fixed number of iteratiosn
+    //      randomly sample some of the vectors and check to see if they are close to some centroid keep that centroid, remove any centroid that is not the closest after a subset of the total iterations
+    //      use the random sample to move all of the centroids that remain closer to the ideal positions
+    //      continue doing this iteration until we reach desired clusters
+    //      increase the overall "cost" of a centroid suriving over time
+
+    Random random = new Random();
+    for(int i = 0; i < centroids.length; i++) {
+      int n = floatVectorValues.size();
+      int[] randomVectorIdx = new int[n];
+      // look at 10% of the data
+      for (int j = 0; j < n * 0.10; j++) {
+        // Generate a random number between 0 and n
+        int r = random.nextInt(n);
+        randomVectorIdx[j] = r;
+      }
+
+      for(int j = 0; j < randomVectorIdx.length; j++) {
+        float[] v = new float[fieldInfo.getVectorDimension()];
+        System.arraycopy(floatVectorValues.vectorValue(randomVectorIdx[j]), 0, v, 0, vector.length);
+
+      }
+    }
+
+    // FIXME: HERE WAGS
+    // start by iterating over all vectors and assign them to the centroids we've come up with prior to this step (agglom for instance)
+    // additionally keep a table of the distances from each vector to each centroid.  We will update this table whenever an update is made to the centroid
+    // keep a table of the original vector->centroid assignment and the final vector->centroid assignment
+    // run effectively a kmeans iteration over the whole set of centroids using a random sample of vectors each iteration
+    // ... the problem is when a centroid moves we have to update all the distances of all the vectors to that centroid, which is too expensive
+    // ...
+    // ... compute the distance to the merged centroid
+    // ...
+
+
+//    // FIXME: could also consider all other vectors around it
+//    centroidIdx = 0;
+//    float[][] initCentroids = centroids;
+//    for(int i = 0; i < labels.length; i++) {
+//      if(labels[i] == (i+1)) {
+//        List<float[]> vectors = new ArrayList<>();
+//
+//        SegmentCentroid segmentCentroid = segmentCentroids.get(i);
+//        float[] baseVector = centroidList.get(segmentCentroid.segment).vectorValue(segmentCentroid.centroid);
+//
+//        // update each centroid based on the vectors that make up that cluster
+//        vectors.add(baseVector);
+//        centroids[centroidIdx];
+//        centroidIdx++;
+//
+//        // go find each label and then get vectors associated with all labeled clusters
+//        for (int j = 0; j < labels.length; j++) {
+//          if(labels[i] == labels[j]) {
+//            vectors.add()
+//          }
+//        }
+//      }
+//    }
+
+//    float[][] initCentroids = centroids;
+//    final KMeans.Results kMeans =
+//      KMeans.cluster(
+//        floatVectorValues,
+//        desiredClusters,
+//        false,
+//        42L,
+//        KMeans.KmeansInitializationMethod.PLUS_PLUS,
+//        initCentroids,
+//        fieldInfo.getVectorSimilarityFunction() == VectorSimilarityFunction.COSINE,
+//        1,
+//        3,
+//        desiredClusters * 64);
+//    centroids = kMeans.centroids();
 
     // write them
     OptimizedScalarQuantizer osq =
