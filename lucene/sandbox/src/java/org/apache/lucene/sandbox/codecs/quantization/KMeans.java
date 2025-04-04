@@ -45,7 +45,7 @@ public class KMeans {
   public static final int DEFAULT_ITRS = 10;
   public static final int DEFAULT_SAMPLE_SIZE = 100_000;
 
-  private static final float EPS = 1f / 1024f;
+  static final float EPS = 1f / 1024f;
   private final FloatVectorValues vectors;
   private final int numVectors;
   private final int numCentroids;
