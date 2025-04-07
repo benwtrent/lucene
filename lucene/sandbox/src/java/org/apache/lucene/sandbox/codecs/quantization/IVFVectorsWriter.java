@@ -118,7 +118,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
       float[] globalCentroid)
       throws IOException;
 
-  protected abstract long[][] buildAndWritePostingsLists(
+  protected abstract long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
       IVFUtils.CentroidAssignmentScorer scorer,
       FloatVectorValues floatVectorValues,
@@ -133,7 +133,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
       float[] globalCentroid)
       throws IOException;
 
-  protected abstract long[][] buildAndWritePostingsLists(
+  protected abstract long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
       InfoStream infoStream,
       IVFUtils.CentroidAssignmentScorer scorer,
@@ -160,7 +160,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
           calculateAndWriteCentroids(
               fieldWriter.fieldInfo, floatVectorValues, ivfCentroids, globalCentroid);
       long centroidLength = ivfCentroids.getFilePointer() - centroidOffset;
-      final long[][] offsets =
+      final long[] offsets =
           buildAndWritePostingsLists(
               fieldWriter.fieldInfo,
               segmentWriteState.infoStream,
@@ -168,11 +168,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
               floatVectorValues,
               ivfClusters);
       // write posting lists
-      if (offsets.length > 0) {
-        writeMeta(fieldWriter.fieldInfo, centroidOffset, centroidLength, offsets, globalCentroid);
-      } else {
-        writeMeta(fieldWriter.fieldInfo, centroidOffset, 0, new long[0][0], null);
-      }
+      writeMeta(fieldWriter.fieldInfo, centroidOffset, centroidLength, offsets, globalCentroid);
     }
   }
 
@@ -299,7 +295,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
         try {
           if (numCentroids == 0) {
             centroidOffset = ivfCentroids.getFilePointer();
-            writeMeta(fieldInfo, centroidOffset, 0, new long[0][0], null);
+            writeMeta(fieldInfo, centroidOffset, 0, new long[0], null);
             CodecUtil.writeFooter(centroidTemp);
             IOUtils.close(centroidTemp);
             return;
@@ -317,7 +313,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
             assert centroidAssignmentScorer.size() == numCentroids;
             // build a float vector values with random access
             // build centroids
-            final long[][] offsets =
+            final long[] offsets =
                 buildAndWritePostingsLists(
                     fieldInfo,
                     centroidAssignmentScorer,
@@ -332,11 +328,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
                   "No global centroid found for field: " + fieldInfo.name);
             }
             assert offsets.length == centroidAssignmentScorer.size();
-            if (offsets.length > 0) {
-              writeMeta(fieldInfo, centroidOffset, centroidLength, offsets, globalCentroid);
-            } else {
-              writeMeta(fieldInfo, centroidOffset, 0, new long[0][0], null);
-            }
+            writeMeta(fieldInfo, centroidOffset, centroidLength, offsets, globalCentroid);
           }
         } finally {
           IOUtils.deleteFilesIgnoringExceptions(mergeState.segmentInfo.dir, name);
@@ -409,7 +401,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
       FieldInfo field,
       long centroidOffset,
       long centroidLength,
-      long[][] offsetAndLengths,
+      long[] offsets,
       float[] globalCentroid)
       throws IOException {
     ivfMeta.writeInt(field.number);
@@ -417,13 +409,11 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
     ivfMeta.writeInt(distFuncToOrd(field.getVectorSimilarityFunction()));
     ivfMeta.writeLong(centroidOffset);
     ivfMeta.writeLong(centroidLength);
-    ivfMeta.writeVInt(offsetAndLengths.length);
-    for (long[] offsetAndLength : offsetAndLengths) {
-      assert offsetAndLength.length == 2;
-      ivfMeta.writeLong(offsetAndLength[0]);
-      ivfMeta.writeLong(offsetAndLength[1]);
+    ivfMeta.writeVInt(offsets.length);
+    for (long offset : offsets) {
+      ivfMeta.writeLong(offset);
     }
-    if (offsetAndLengths.length > 0) {
+    if (offsets.length > 0) {
       final ByteBuffer buffer =
           ByteBuffer.allocate(globalCentroid.length * Float.BYTES).order(ByteOrder.LITTLE_ENDIAN);
       buffer.asFloatBuffer().put(globalCentroid);

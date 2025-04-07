@@ -122,7 +122,7 @@ public abstract class KnnVectorsWriter implements Accountable, Closeable {
   }
 
   /** Tracks state of one sub-reader that we are merging */
-  private static class FloatVectorValuesSub extends DocIDMerger.Sub {
+  public static class FloatVectorValuesSub extends DocIDMerger.Sub {
 
     final FloatVectorValues values;
     final KnnVectorValues.DocIndexIterator iterator;

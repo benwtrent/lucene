@@ -48,6 +48,33 @@ Other
 
 * GITHUB#14229: Bump minimum required Java version to 25
 
+======================= Lucene 10.3.0 =======================
+
+API Changes
+---------------------
+* GITHUB#14401: Added LeafCollector#collectRange to enable collector to take
+  advantage of pre-aggregated data to speed up faceting. (Adrien Grand)
+
+New Features
+---------------------
+(No changes)
+
+Improvements
+---------------------
+(No changes)
+
+Optimizations
+---------------------
+* GITHUB#14418: Quick exit on filter query matching no docs when rewriting knn query. (Pan Guixin)
+
+Bug Fixes
+---------------------
+(No changes)
+
+Other
+---------------------
+(No changes)
+
 ======================= Lucene 10.2.0 =======================
 
 API Changes
@@ -108,6 +135,8 @@ New Features
 * GITHUB#13470: Added `TopDocs#rrf` to combine multiple TopDocs instances using
   reciprocal rank fusion. (Haren Lin, Adrien Grand)
 
+* GITHUB#14412: Allow skip cache factor to be updated dynamically. (Sagar Upadhyaya)
+
 Improvements
 ---------------------
 
@@ -136,6 +165,9 @@ Improvements
 
 * GITHUB#14192: Added support for RegExp to handle case insensitive matching
   across the full set of Unicode characters. (John Wagster)
+
+* GITHUB#14381: Add RegExp.CASE_INSENSITIVE_RANGE flag to support case-insensitive
+  matches of character class ranges such as /[a-z]/ (Robert Muir)
 
 * GITHUB#14239: Hunspell's option to tolerate affix rule count mismatches was
   improved to tolerate more instances of this problem.  (Robert Muir)
@@ -191,6 +223,16 @@ Optimizations
 
 # GITHUB#14361: Introduce new encoding of BPV 21 for DocIdsWriter used in BKD Tree. (Aniketh Jain, Guo Feng)
 
+* GITHUB#14331: Speedup merging of HNSW graphs. (Mayya Sharipova, Tom Veasey)
+
+* GITHUB#14383: Use FixedLengthBytesRefArray in OneDimensionBKDWriter to hold split values. (Ignacio Vera)
+
+* GITHUB#14373: Optimized `ParallelLeafReader` to improve term vector fetching efficiency. (Divyansh Agrawal)
+
+* GITHUB#14393: Pack file pointers using the packed monotonic builder when building BKD trees. (Ignacio Vera)
+
+* GITHUB#14304: Add SIMD optimizations for scalar quantized queries and indexing. (Simon Cooper)
+
 Bug Fixes
 ---------------------
 
@@ -202,7 +244,7 @@ Bug Fixes
 * GITHUB#14126: Avoid overflow in index input slices invariant checks
   (Chris Hegarty)
 
-* GITHUB#14215: Fix degenerate case in HNSW where all vectors have the same score. (Ben Trent)
+* GITHUB#14215, GITHUB#14249, GITHUB#14366: Fix degenerate case in HNSW where all vectors have the same score. (Ben Trent, Ignacio Vera)
 
 * GITHUB#14320: Fix DirectIOIndexInput seek to not read when position is within buffer (Chris Hegarty)
 
@@ -225,9 +267,11 @@ Other
 
 * GITHUB#14223 : Fixed a flaky test TestKnnFloatVectorQuery.testFindFewer (Navneet Verma)
 
-* GITHUB#14279 : Add github action to verify changelog entry and set milestone to PRs. (Amir Raza)
-
 * GITHUB#14372: Reduce visibility of NRTSuggester#load from public to package private (Luca Cavanna)
+
+* GITHUB#14386: Bump analysis/icu's icu4j dependency to 77.1 (Robert Muir)
+
+* GITHUB#14388: Bump expression's antlr dependency to 4.13.2 (Dawid Weiss, Robert Muir)
 
 ======================= Lucene 10.1.0 =======================
 
