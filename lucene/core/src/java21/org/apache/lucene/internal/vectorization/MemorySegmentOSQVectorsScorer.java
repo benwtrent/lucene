@@ -315,7 +315,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
   }
 
   @Override
-  public void scoreBulk(
+  public float scoreBulk(
       byte[] q,
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
@@ -326,17 +326,15 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
     // 128 / 8 == 16
     if (length >= 16 && PanamaVectorConstants.HAS_FAST_INTEGER_VECTORS) {
       if (PanamaVectorUtilSupport.VECTOR_BITSIZE >= 256) {
-        score256Bulk(q, queryCorrections, similarityFunction, centroidDp, scores);
-        return;
+        return score256Bulk(q, queryCorrections, similarityFunction, centroidDp, scores);
       } else if (PanamaVectorUtilSupport.VECTOR_BITSIZE == 128) {
-        score128Bulk(q, queryCorrections, similarityFunction, centroidDp, scores);
-        return;
+        return score128Bulk(q, queryCorrections, similarityFunction, centroidDp, scores);
       }
     }
-    super.scoreBulk(q, queryCorrections, similarityFunction, centroidDp, scores);
+    return super.scoreBulk(q, queryCorrections, similarityFunction, centroidDp, scores);
   }
 
-  private void score128Bulk(
+  private float score128Bulk(
       byte[] q,
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
@@ -350,6 +348,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
     float ay = queryCorrections.lowerInterval();
     float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
     float y1 = queryCorrections.quantizedComponentSum();
+    float maxScore = Float.NEGATIVE_INFINITY;
     for (; i < limit; i += FLOAT_SPECIES_128.length()) {
       var ax =
           FloatVector.fromMemorySegment(
@@ -394,6 +393,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
                 .add(queryCorrections.additionalCorrection())
                 .add(1f);
         res = FloatVector.broadcast(FLOAT_SPECIES_128, 1).div(res).max(0);
+        maxScore = Math.max(maxScore, res.reduceLanes(VectorOperators.MAX));
         res.intoArray(scores, i);
       } else {
         // For cosine and max inner product, we need to apply the additional correction, which is
@@ -407,17 +407,20 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
           // not sure how to do it better
           for (int j = 0; j < FLOAT_SPECIES_128.length(); j++) {
             scores[i + j] = VectorUtil.scaleMaxInnerProductScore(scores[i + j]);
+            maxScore = Math.max(maxScore, scores[i + j]);
           }
         } else {
           res = res.add(1f).mul(0.5f).max(0);
+          maxScore = Math.max(maxScore, res.reduceLanes(VectorOperators.MAX));
           res.intoArray(scores, i);
         }
       }
     }
     in.seek(offset + 14L * BULK_SIZE);
+    return maxScore;
   }
 
-  private void score256Bulk(
+  private float score256Bulk(
       byte[] q,
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
@@ -431,6 +434,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
     float ay = queryCorrections.lowerInterval();
     float ly = (queryCorrections.upperInterval() - ay) * FOUR_BIT_SCALE;
     float y1 = queryCorrections.quantizedComponentSum();
+    float maxScore = Float.NEGATIVE_INFINITY;
     for (; i < limit; i += FLOAT_SPECIES_256.length()) {
       var ax =
           FloatVector.fromMemorySegment(
@@ -475,6 +479,7 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
                 .add(queryCorrections.additionalCorrection())
                 .add(1f);
         res = FloatVector.broadcast(FLOAT_SPECIES_256, 1).div(res).max(0);
+        maxScore = Math.max(maxScore, res.reduceLanes(VectorOperators.MAX));
         res.intoArray(scores, i);
       } else {
         // For cosine and max inner product, we need to apply the additional correction, which is
@@ -488,13 +493,16 @@ public final class MemorySegmentOSQVectorsScorer extends OSQVectorsScorer {
           // not sure how to do it better
           for (int j = 0; j < FLOAT_SPECIES_256.length(); j++) {
             scores[i + j] = VectorUtil.scaleMaxInnerProductScore(scores[i + j]);
+            maxScore = Math.max(maxScore, scores[i + j]);
           }
         } else {
           res = res.add(1f).mul(0.5f).max(0);
+          maxScore = Math.max(maxScore, res.reduceLanes(VectorOperators.MAX));
           res.intoArray(scores, i);
         }
       }
     }
     in.seek(offset + 14L * BULK_SIZE);
+    return maxScore;
   }
 }
