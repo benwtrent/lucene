@@ -26,7 +26,6 @@ import org.apache.lucene.sandbox.search.knn.IVFKnnSearchStrategy;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.ArrayUtil;
-import org.apache.lucene.util.GroupVIntUtil;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
@@ -255,6 +254,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     final FieldInfo fieldInfo;
     final IntPredicate needsScoring;
     private final OSQVectorsScorer osqVectorsScorer;
+    final float[] scores = new float[OSQVectorsScorer.BULK_SIZE];
 
     int[] docIdsScratch = new int[0];
     int vectors;
@@ -263,6 +263,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     float[] centroid;
     long slicePos;
     OptimizedScalarQuantizer.QuantizationResult queryCorrections;
+    DocIdsWriter docIdsWriter = new DocIdsWriter();
 
     final float[] scratch;
     final byte[] quantizationScratch;
@@ -302,44 +303,87 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       this.centroid = centroid;
       // read the doc ids
       docIdsScratch = vectors > docIdsScratch.length ? new int[vectors] : docIdsScratch;
-      GroupVIntUtil.readGroupVInts(indexInput, docIdsScratch, vectors);
-      prefixSum(docIdsScratch, vectors);
+      docIdsWriter.readInts(indexInput, vectors, docIdsScratch);
       slicePos = indexInput.getFilePointer();
       return vectors;
     }
 
     @Override
     public int visit(KnnCollector knnCollector) throws IOException {
-      int scoreDocs = 0;
-      assert slicePos == indexInput.getFilePointer();
-      for (int i = 0; i < vectors; i++) {
-        final int docId = docIdsScratch[i];
-        if (needsScoring.test(docId) == false) {
+      // block processing
+      int scoredDocs = 0;
+      int limit = vectors - OSQVectorsScorer.BULK_SIZE + 1;
+      int i = 0;
+      for (; i < limit; i += OSQVectorsScorer.BULK_SIZE) {
+        int docsToScore = OSQVectorsScorer.BULK_SIZE;
+        for (int j = 0; j < OSQVectorsScorer.BULK_SIZE; j++) {
+          int doc = docIdsScratch[i + j];
+          if (needsScoring.test(doc) == false) {
+            docIdsScratch[i + j] = -1;
+            docsToScore--;
+          }
+        }
+        if (docsToScore == 0) {
           continue;
         }
+        // TODO specialize depending on the number of docs to visit
         quantizeQueryIfNecessary();
         indexInput.seek(slicePos + i * quantizedByteLength);
-        final float qcDist = osqVectorsScorer.quantizeScore(quantizedQueryScratch);
-        indexInput.readFloats(correctiveValues, 0, correctiveValues.length);
-        final int quantizedComponentSum = Short.toUnsignedInt(indexInput.readShort());
-        float score =
-            osqVectorsScorer.score(
+        float maxScore =
+            osqVectorsScorer.scoreBulk(
+                quantizedQueryScratch,
                 queryCorrections,
                 fieldInfo.getVectorSimilarityFunction(),
                 centroidDp,
-                correctiveValues[0],
-                correctiveValues[1],
-                quantizedComponentSum,
-                correctiveValues[2],
-                qcDist);
-        ++scoreDocs;
-        knnCollector.incVisitedCount(1);
-        knnCollector.collect(docId, score);
-        if (knnCollector.earlyTerminated()) {
-          return scoreDocs;
+                scores);
+        if (maxScore <= knnCollector.minCompetitiveSimilarity()) {
+          // all scores are less or equal than the min competitive score
+          knnCollector.incVisitedCount(docsToScore);
+          if (knnCollector.earlyTerminated()) {
+            return scoredDocs;
+          }
+          continue;
+        }
+        for (int j = 0; j < OSQVectorsScorer.BULK_SIZE; j++) {
+          int doc = docIdsScratch[i + j];
+          if (doc != -1) {
+            scoredDocs++;
+            knnCollector.incVisitedCount(1);
+            knnCollector.collect(doc, scores[j]);
+            if (knnCollector.earlyTerminated()) {
+              return scoredDocs;
+            }
+          }
         }
       }
-      return scoreDocs;
+      // process tail
+      for (; i < vectors; i++) {
+        int doc = docIdsScratch[i];
+        if (needsScoring.test(doc)) {
+          quantizeQueryIfNecessary();
+          indexInput.seek(slicePos + i * quantizedByteLength);
+          float qcDist = osqVectorsScorer.quantizeScore(quantizedQueryScratch);
+          indexInput.readFloats(correctiveValues, 0, 3);
+          final int quantizedComponentSum = Short.toUnsignedInt(indexInput.readShort());
+          float score =
+              osqVectorsScorer.score(
+                  queryCorrections,
+                  fieldInfo.getVectorSimilarityFunction(),
+                  centroidDp,
+                  correctiveValues[0],
+                  correctiveValues[1],
+                  quantizedComponentSum,
+                  correctiveValues[2],
+                  qcDist);
+          scoredDocs++;
+          knnCollector.incVisitedCount(1);
+          knnCollector.collect(doc, score);
+          if (knnCollector.earlyTerminated()) {
+            return scoredDocs;
+          }
+        }
+      }
+      return scoredDocs;
     }
 
     private void quantizeQueryIfNecessary() {

@@ -24,9 +24,9 @@ import org.apache.lucene.index.MergeState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.internal.hppc.IntArrayList;
+import org.apache.lucene.internal.vectorization.OSQVectorsScorer;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.NeighborQueue;
@@ -45,6 +45,9 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   static final float EXT_SOAR_LIMIT_CHECK_RATIO = 0.25f;
 
   private final int vectorPerCluster;
+
+  private final OptimizedScalarQuantizer.QuantizationResult[] corrections =
+      new OptimizedScalarQuantizer.QuantizationResult[OSQVectorsScorer.BULK_SIZE];
 
   public DefaultIVFVectorsWriter(
       SegmentWriteState state, FlatVectorsWriter rawVectorDelegate, int vectorPerCluster)
@@ -149,34 +152,22 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     BinarizedFloatVectorValues binarizedByteVectorValues =
         new BinarizedFloatVectorValues(floatVectorValues, quantizer);
-    int[] docIdBuffer = new int[floatVectorValues.size() / randomCentroidScorer.size()];
+    DocIdsWriter docIdsWriter = new DocIdsWriter();
     for (int i = 0; i < randomCentroidScorer.size(); i++) {
       float[] centroid = randomCentroidScorer.centroid(i);
       binarizedByteVectorValues.centroid = centroid;
-      IntArrayList cluster = clusters[i].sort();
+      // TODO sort by distance to the centroid
+      IntArrayList cluster = clusters[i];
       // TODO align???
       offsets[i] = postingsOutput.getFilePointer();
       int size = cluster.size();
       postingsOutput.writeVInt(size);
       postingsOutput.writeInt(Float.floatToIntBits(VectorUtil.dotProduct(centroid, centroid)));
-      // varint encode the docIds
-      int lastDocId = -1;
-      docIdBuffer =
-          size > docIdBuffer.length ? ArrayUtil.growExact(docIdBuffer, size) : docIdBuffer;
-      for (int j = 0; j < size; j++) {
-        int docId = floatVectorValues.ordToDoc(cluster.get(j));
-        assert lastDocId < 0 || docId >= lastDocId;
-        if (lastDocId >= 0) {
-          docIdBuffer[j] = docId - lastDocId;
-        } else {
-          docIdBuffer[j] = docId;
-        }
-        lastDocId = docId;
-      }
       // TODO we might want to consider putting the docIds in a separate file
       //  to aid with only having to fetch vectors from slower storage when they are required
       //  keeping them in the same file indicates we pull the entire file into cache
-      postingsOutput.writeGroupVInts(docIdBuffer, size);
+      docIdsWriter.writeDocIds(
+          j -> floatVectorValues.ordToDoc(cluster.get(j)), cluster.size(), postingsOutput);
       writePostingList(cluster, postingsOutput, binarizedByteVectorValues);
     }
     return offsets;
@@ -187,13 +178,49 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       IndexOutput postingsOutput,
       BinarizedFloatVectorValues binarizedByteVectorValues)
       throws IOException {
-    for (int cidx = 0; cidx < cluster.size(); cidx++) {
+    int limit = cluster.size() - OSQVectorsScorer.BULK_SIZE + 1;
+    int cidx = 0;
+    // Write vectors in bulks of OSQVectorsScorer.BULK_SIZE.
+    for (; cidx < limit; cidx += OSQVectorsScorer.BULK_SIZE) {
+      for (int j = 0; j < OSQVectorsScorer.BULK_SIZE; j++) {
+        int ord = cluster.get(cidx + j);
+        byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
+        // write vector
+        postingsOutput.writeBytes(binaryValue, 0, binaryValue.length);
+        corrections[j] = binarizedByteVectorValues.getCorrectiveTerms(ord);
+      }
+      // write corrections
+      for (int j = 0; j < OSQVectorsScorer.BULK_SIZE; j++) {
+        postingsOutput.writeInt(Float.floatToIntBits(corrections[j].lowerInterval()));
+      }
+      for (int j = 0; j < OSQVectorsScorer.BULK_SIZE; j++) {
+        postingsOutput.writeInt(Float.floatToIntBits(corrections[j].upperInterval()));
+      }
+      for (int j = 0; j < OSQVectorsScorer.BULK_SIZE; j++) {
+        int targetComponentSum = corrections[j].quantizedComponentSum();
+        assert targetComponentSum >= 0 && targetComponentSum <= 0xffff;
+        postingsOutput.writeShort((short) targetComponentSum);
+      }
+      for (int j = 0; j < OSQVectorsScorer.BULK_SIZE; j++) {
+        postingsOutput.writeInt(Float.floatToIntBits(corrections[j].additionalCorrection()));
+      }
+    }
+    // write tail
+    for (; cidx < cluster.size(); cidx++) {
       int ord = cluster.get(cidx);
       // write vector
       byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
       OptimizedScalarQuantizer.QuantizationResult corrections =
           binarizedByteVectorValues.getCorrectiveTerms(ord);
       IVFUtils.writeQuantizedValue(postingsOutput, binaryValue, corrections);
+      binarizedByteVectorValues.getCorrectiveTerms(ord);
+      postingsOutput.writeBytes(binaryValue, 0, binaryValue.length);
+      postingsOutput.writeInt(Float.floatToIntBits(corrections.lowerInterval()));
+      postingsOutput.writeInt(Float.floatToIntBits(corrections.upperInterval()));
+      postingsOutput.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
+      assert corrections.quantizedComponentSum() >= 0
+          && corrections.quantizedComponentSum() <= 0xffff;
+      postingsOutput.writeShort((short) corrections.quantizedComponentSum());
     }
   }
 
@@ -404,29 +431,22 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
     BinarizedFloatVectorValues binarizedByteVectorValues =
         new BinarizedFloatVectorValues(floatVectorValues, quantizer);
-    int[] docIdBuffer = new int[floatVectorValues.size() / centroidAssignmentScorer.size()];
+    DocIdsWriter docIdsWriter = new DocIdsWriter();
     for (int i = 0; i < centroidAssignmentScorer.size(); i++) {
       float[] centroid = centroidAssignmentScorer.centroid(i);
       binarizedByteVectorValues.centroid = centroid;
-      IntArrayList cluster = clusters[i].sort();
+      // TODO: sort by distance to the centroid
+      IntArrayList cluster = clusters[i];
       // TODO align???
       offsets[i] = postingsOutput.getFilePointer();
       int size = cluster.size();
       postingsOutput.writeVInt(size);
       postingsOutput.writeInt(Float.floatToIntBits(VectorUtil.dotProduct(centroid, centroid)));
-      // varint encode the docIds
-      int lastDocId = 0;
-      docIdBuffer =
-          size > docIdBuffer.length ? ArrayUtil.growExact(docIdBuffer, size) : docIdBuffer;
-      for (int j = 0; j < size; j++) {
-        int docId = floatVectorValues.ordToDoc(cluster.get(j));
-        docIdBuffer[j] = docId - lastDocId;
-        lastDocId = docId;
-      }
       // TODO we might want to consider putting the docIds in a separate file
       //  to aid with only having to fetch vectors from slower storage when they are required
       //  keeping them in the same file indicates we pull the entire file into cache
-      postingsOutput.writeGroupVInts(docIdBuffer, size);
+      docIdsWriter.writeDocIds(
+          j -> floatVectorValues.ordToDoc(cluster.get(j)), size, postingsOutput);
       writePostingList(cluster, postingsOutput, binarizedByteVectorValues);
     }
     return offsets;
