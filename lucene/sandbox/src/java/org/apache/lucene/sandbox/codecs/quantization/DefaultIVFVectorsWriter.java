@@ -29,7 +29,6 @@ import org.apache.lucene.internal.hppc.IntArrayList;
 import org.apache.lucene.internal.vectorization.OSQVectorsScorer;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.VectorUtil;

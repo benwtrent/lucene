@@ -7,7 +7,6 @@
 package org.apache.lucene.sandbox.codecs.quantization;
 
 import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.SIMILARITY_FUNCTIONS;
-import static org.apache.lucene.sandbox.codecs.quantization.DefaultIVFVectorsReader.prefixSum;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
@@ -36,7 +35,6 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
-import org.apache.lucene.util.GroupVIntUtil;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 
@@ -129,8 +127,9 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     int vectors = ivfClusters.readVInt();
     float innerProduct = Float.intBitsToFloat(ivfClusters.readInt());
     int[] vectorDocIds = new int[vectors];
-    GroupVIntUtil.readGroupVInts(ivfClusters, vectorDocIds, vectors);
-    prefixSum(vectorDocIds, vectors);
+    DocIdsWriter docIdsWriter = new DocIdsWriter();
+    docIdsWriter.readInts(ivfClusters, vectors, vectorDocIds);
+
     // TODO this assumes that vectorDocIds are sorted!!!
     int count = 0;
     for (int i = 0; i < vectors; i++) {

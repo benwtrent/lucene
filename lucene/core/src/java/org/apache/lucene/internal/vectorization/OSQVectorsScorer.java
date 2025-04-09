@@ -137,7 +137,6 @@ public class OSQVectorsScorer {
    * as shorts, and finally all the additional corrections as floats.
    *
    * <p>The results are stored in the provided scores array. It returns the max score on the array/
-   *
    */
   public float scoreBulk(
       byte[] q,
