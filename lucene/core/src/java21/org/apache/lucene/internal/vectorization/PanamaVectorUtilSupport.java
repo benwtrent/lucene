@@ -1214,18 +1214,21 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
       FloatVector projVec1 = FloatVector.zero(FLOAT_SPECIES);
       FloatVector projVec2 = FloatVector.zero(FLOAT_SPECIES);
       int unrolledLimit = FLOAT_SPECIES.loopBound(v1.length) - FLOAT_SPECIES.length();
-      for (; i < unrolledLimit; i += 2*FLOAT_SPECIES.length()) {
+      for (; i < unrolledLimit; i += 2 * FLOAT_SPECIES.length()) {
         // one
         FloatVector v1Vec0 = FloatVector.fromArray(FLOAT_SPECIES, v1, i);
         FloatVector centroidVec0 = FloatVector.fromArray(FLOAT_SPECIES, centroid, i);
-        FloatVector originalResidualVec0 = FloatVector.fromArray(FLOAT_SPECIES, originalResidual, i);
+        FloatVector originalResidualVec0 =
+            FloatVector.fromArray(FLOAT_SPECIES, originalResidual, i);
         FloatVector djkVec0 = v1Vec0.sub(centroidVec0);
         projVec1 = fma(djkVec0, originalResidualVec0, projVec1);
 
         // two
         FloatVector v1Vec1 = FloatVector.fromArray(FLOAT_SPECIES, v1, i + FLOAT_SPECIES.length());
-        FloatVector centroidVec1 = FloatVector.fromArray(FLOAT_SPECIES, centroid, i + FLOAT_SPECIES.length());
-        FloatVector originalResidualVec1 = FloatVector.fromArray(FLOAT_SPECIES, originalResidual, i + FLOAT_SPECIES.length());
+        FloatVector centroidVec1 =
+            FloatVector.fromArray(FLOAT_SPECIES, centroid, i + FLOAT_SPECIES.length());
+        FloatVector originalResidualVec1 =
+            FloatVector.fromArray(FLOAT_SPECIES, originalResidual, i + FLOAT_SPECIES.length());
         FloatVector djkVec1 = v1Vec1.sub(centroidVec1);
         projVec2 = fma(djkVec1, originalResidualVec1, projVec2);
       }
