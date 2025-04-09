@@ -581,6 +581,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     // we at most will look at the EXT_SOAR_LIMIT_CHECK_RATIO nearest centroids if possible
     int soarToCheck = (int) (numCentroids * EXT_SOAR_LIMIT_CHECK_RATIO);
     int soarClusterCheckCount = Math.min(numCentroids - 1, soarToCheck);
+    // TODO is this the right to check?
+    //   If cluster quality is higher, maybe we can reduce this...
     int prefilteredCentroidCount =
         Math.max(soarClusterCheckCount + 1, numCentroids / state.knnVectorsReaders.length);
     NeighborQueue prefilteredCentroidsToCheck = new NeighborQueue(prefilteredCentroidCount, true);
