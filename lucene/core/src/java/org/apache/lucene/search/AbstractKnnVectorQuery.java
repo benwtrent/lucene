@@ -54,7 +54,7 @@ import org.apache.lucene.util.Bits;
  */
 public abstract class AbstractKnnVectorQuery extends Query {
 
-  private static final TopDocs NO_RESULTS = TopDocsCollector.EMPTY_TOPDOCS;
+  public static final TopDocs NO_RESULTS = TopDocsCollector.EMPTY_TOPDOCS;
 
   protected final String field;
   protected final int k;
@@ -121,7 +121,7 @@ public abstract class AbstractKnnVectorQuery extends Query {
     return results;
   }
 
-  private TopDocs getLeafResults(
+  protected TopDocs getLeafResults(
       LeafReaderContext ctx, Weight filterWeight, KnnCollectorManager knnCollectorManager)
       throws IOException {
     final LeafReader reader = ctx.reader();
@@ -166,7 +166,7 @@ public abstract class AbstractKnnVectorQuery extends Query {
     }
   }
 
-  private BitSet createBitSet(DocIdSetIterator iterator, Bits liveDocs, int maxDoc)
+  protected BitSet createBitSet(DocIdSetIterator iterator, Bits liveDocs, int maxDoc)
       throws IOException {
     if (liveDocs == null && iterator instanceof BitSetIterator bitSetIterator) {
       // If we already have a BitSet and no deletions, reuse the BitSet

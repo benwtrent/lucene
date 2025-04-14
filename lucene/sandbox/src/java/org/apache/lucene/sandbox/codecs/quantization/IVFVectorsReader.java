@@ -391,9 +391,6 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
           scorer.resetPostingsScorer(
               centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
       actualDocs += scorer.visit(knnCollector);
-      if (knnCollector.earlyTerminated()) {
-        return;
-      }
     }
     // if we are using a filtered search, we need to account for the documents that were filtered
     // so continue exploring past centroidsToSearch until we reach the expected number of documents
@@ -403,9 +400,6 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       int centroidOrdinal = centroidQueue.pop();
       scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
       actualDocs += scorer.visit(knnCollector);
-      if (knnCollector.earlyTerminated()) {
-        return;
-      }
     }
   }
 
