@@ -352,6 +352,12 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     if (knnCollector.getSearchStrategy() instanceof IVFKnnSearchStrategy ivfStrategy) {
       nProbe = ivfStrategy.getNProbe();
     }
+    float percentFiltered = 1f;
+    if (acceptDocs instanceof BitSet bitSet) {
+      percentFiltered =
+          Math.max(0f, Math.min(1f, (float) bitSet.approximateCardinality() / bitSet.length()));
+    }
+    int numVectors = rawVectorsReader.getFloatVectorValues(field).size();
     BitSet visitedDocs = new FixedBitSet(state.segmentInfo.maxDoc() + 1);
     // TODO can we make a conjunction between idSetIterator and the acceptDocs?
     IntPredicate needsScoring =
@@ -392,15 +398,17 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
               centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
       actualDocs += scorer.visit(knnCollector);
     }
-    // if we are using a filtered search, we need to account for the documents that were filtered
-    // so continue exploring past centroidsToSearch until we reach the expected number of documents
-    // TODO, can we pick something smarter than 0.5?
-    //    Something related to percent filtered vs ratio of actual/expected docs?
-    float expectedScored = expectedDocs * 0.5f;
-    while (acceptDocs != null && centroidQueue.size() > 0 && actualDocs < expectedScored) {
-      int centroidOrdinal = centroidQueue.pop();
-      scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
-      actualDocs += scorer.visit(knnCollector);
+    if (acceptDocs != null) {
+      float unfilteredRatioVisited = (float) expectedDocs / numVectors;
+      int filteredVectors = (int) Math.ceil(numVectors * percentFiltered);
+      float expectedScored =
+          Math.min(2 * filteredVectors * unfilteredRatioVisited, expectedDocs / 2f);
+      while (centroidQueue.size() > 0
+          && (actualDocs < expectedScored || actualDocs < knnCollector.k())) {
+        int centroidOrdinal = centroidQueue.pop();
+        scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
+        actualDocs += scorer.visit(knnCollector);
+      }
     }
   }
 
