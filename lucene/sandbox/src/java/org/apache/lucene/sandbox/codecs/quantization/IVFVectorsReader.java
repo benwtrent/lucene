@@ -394,8 +394,9 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
     // if we are using a filtered search, we need to account for the documents that were filtered
     // so continue exploring past centroidsToSearch until we reach the expected number of documents
-    // TODO, can we pick something smarter than 0.9? Something related to average posting list size?
-    float expectedScored = expectedDocs * 0.9f;
+    // TODO, can we pick something smarter than 0.5?
+    //    Something related to percent filtered vs ratio of actual/expected docs?
+    float expectedScored = expectedDocs * 0.5f;
     while (acceptDocs != null && centroidQueue.size() > 0 && actualDocs < expectedScored) {
       int centroidOrdinal = centroidQueue.pop();
       scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));

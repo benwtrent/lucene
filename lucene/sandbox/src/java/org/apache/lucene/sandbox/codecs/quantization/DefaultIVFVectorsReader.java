@@ -371,7 +371,6 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         if (docsToScore == 0) {
           continue;
         }
-        // TODO specialize depending on the number of docs to visit
         quantizeQueryIfNecessary();
         indexInput.seek(slicePos + i * quantizedByteLength);
         if (docsToScore < BULK_SIZE / 2) {
