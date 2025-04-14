@@ -16,7 +16,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.hnsw.FlatVectorsWriter;
@@ -268,10 +267,13 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       segmentIdx++;
     }
 
-    // merge clusters in the size order
     // sort centroid list by floatvector size
-    centroidList.sort(Comparator.comparingInt(FloatVectorValues::size).reversed());
     FloatVectorValues baseSegment = centroidList.get(0);
+    for (var l : centroidList) {
+      if (l.size() > baseSegment.size()) {
+        baseSegment = l;
+      }
+    }
     float[] scratch = new float[fieldInfo.getVectorDimension()];
     float minimumDistance = Float.MAX_VALUE;
     for (int j = 0; j < baseSegment.size(); j++) {
@@ -289,7 +291,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
           "Agglomerative cluster min distance: "
               + minimumDistance
               + " From biggest segment: "
-              + centroidList.get(0).size());
+              + baseSegment.size());
     }
     int[] labels = new int[segmentCentroids.size()];
     // loop over segments
@@ -314,7 +316,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
                 scratch,
                 centroidList
                     .get(segmentCentroids.get(j).segment())
-                    .vectorValue(segmentCentroids.get(j).centroid));
+                    .vectorValue(segmentCentroids.get(j).centroid()));
         if (d < minimumDistance / 2) {
           if (labels[j] == 0) {
             labels[j] = labels[i];
