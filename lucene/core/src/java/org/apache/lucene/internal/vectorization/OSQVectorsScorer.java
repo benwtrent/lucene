@@ -136,9 +136,9 @@ public class OSQVectorsScorer {
    * intervals as floats, then all the upper intervals as floats, then all the target component sums
    * as shorts, and finally all the additional corrections as floats.
    *
-   * <p>The results are stored in the provided scores array. It returns the max score on the array/
+   * <p>The results are stored in the provided scores array.
    */
-  public float scoreBulk(
+  public void scoreBulk(
       byte[] q,
       OptimizedScalarQuantizer.QuantizationResult queryCorrections,
       VectorSimilarityFunction similarityFunction,
@@ -152,7 +152,6 @@ public class OSQVectorsScorer {
       targetComponentSums[i] = Short.toUnsignedInt(in.readShort());
     }
     in.readFloats(additionalCorrections, 0, BULK_SIZE);
-    float maxScore = Float.NEGATIVE_INFINITY;
     for (int i = 0; i < BULK_SIZE; i++) {
       scores[i] =
           score(
@@ -164,8 +163,6 @@ public class OSQVectorsScorer {
               targetComponentSums[i],
               additionalCorrections[i],
               scores[i]);
-      maxScore = Math.max(maxScore, scores[i]);
     }
-    return maxScore;
   }
 }
