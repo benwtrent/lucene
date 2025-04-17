@@ -7,6 +7,8 @@
 package org.apache.lucene.sandbox.codecs.quantization;
 
 import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.SIMILARITY_FUNCTIONS;
+import static org.apache.lucene.sandbox.codecs.quantization.DefaultIVFVectorsReader.prefixSum;
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
 import java.util.function.IntPredicate;
@@ -19,6 +21,8 @@ import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.IndexFileNames;
+import org.apache.lucene.index.KnnVectorValues;
+import org.apache.lucene.index.MergeState;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
@@ -32,6 +36,7 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.GroupVIntUtil;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 
@@ -122,6 +127,99 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     FieldEntry entry = fields.get(fieldInfo.number);
     ivfClusters.seek(entry.postingListOffsets[centroidOrdinal]);
     return ivfClusters.readVInt();
+  }
+
+
+  record CentroidInfo(CentroidFloatVectorValues vectors, float innerProduct) {}
+
+  CentroidInfo centroidVectors(String fieldName, int segmentOrd, int centroidOrd, MergeState state) throws IOException {
+    IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(state.knnVectorsReaders[segmentOrd], fieldName);
+    if (ivfVectorsReader == null) {
+      return null;
+    }
+    FieldInfo info = state.fieldInfos[segmentOrd].fieldInfo(fieldName);
+    FieldEntry entry = fields.get(info.number);
+    if (entry == null) {
+      return null;
+    }
+    if (entry.vectorEncoding() == VectorEncoding.BYTE) {
+      return null;
+    }
+
+    MergeState.DocMap docMap = state.docMaps[segmentOrd];
+    ivfClusters.seek(entry.postingListOffsets[centroidOrd]);
+    int vectors = ivfClusters.readVInt();
+    float innerProduct = Float.intBitsToFloat(ivfClusters.readInt());
+    int[] vectorDocIds = new int[vectors];
+    GroupVIntUtil.readGroupVInts(ivfClusters, vectorDocIds, vectors);
+    prefixSum(vectorDocIds, vectors);
+    // TODO this assumes that vectorDocIds are sorted!!!
+    int count = 0;
+    for (int i = 0; i < vectors; i++) {
+      int docId = vectorDocIds[i];
+      if (docMap.get(docId) != -1) {
+        ++count;
+      }
+    }
+    // TODO: Do we need random access? If so, we should gather the ordinals here by
+    //   iterating the valid docs in the docMap, keeping track of the valid ordinals, then they can be directly
+    //   accessed
+    FloatVectorValues vectorValues = ivfVectorsReader.getFloatVectorValues(fieldName);
+    CentroidFloatVectorValues centroidFloatVectorValues =
+      new CentroidFloatVectorValues(
+        vectorValues, vectorDocIds, docMap, count);
+    return new CentroidInfo(centroidFloatVectorValues, innerProduct);
+  }
+
+  static class CentroidFloatVectorValues {
+    final FloatVectorValues vectorValues;
+    final int[] docIds;
+    final MergeState.DocMap docMap;
+    final int size;
+    int curOriginalDocId = -1;
+    int mappedDocID = -1;
+    KnnVectorValues.DocIndexIterator iterator;
+
+    CentroidFloatVectorValues(
+      FloatVectorValues vectorValues,
+      int[] docIds,
+      MergeState.DocMap docMap,
+      int size
+    ) {
+      this.vectorValues = vectorValues;
+      this.iterator = vectorValues.iterator();
+      this.docIds = docIds;
+      this.docMap = docMap;
+      this.size = size;
+    }
+
+    CentroidFloatVectorValues copy() throws IOException {
+      return new CentroidFloatVectorValues(
+        vectorValues.copy(), docIds, docMap, size);
+    }
+
+    int docId() {
+      return mappedDocID;
+    }
+
+    float[] vectorValue() throws IOException {
+      return vectorValues.vectorValue(iterator.index());
+    }
+
+    int nextVectorDocId() throws IOException {
+      while (curOriginalDocId < docIds.length - 1) {
+        curOriginalDocId++;
+        int doc = iterator.advance(docIds[curOriginalDocId]);
+        if (doc == NO_MORE_DOCS) {
+          return this.mappedDocID = NO_MORE_DOCS;
+        }
+        int mappedDoc = docMap.get(doc);
+        if (mappedDoc != -1) {
+          return this.mappedDocID = mappedDoc;
+        }
+      }
+      return this.mappedDocID = NO_MORE_DOCS;
+    }
   }
 
   private static IndexInput openDataInput(
