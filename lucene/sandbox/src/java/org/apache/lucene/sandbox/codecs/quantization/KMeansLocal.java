@@ -106,8 +106,8 @@ public final class KMeansLocal {
       }
     }
 
-    System.out.println(" ==== c len: " + centers.length);
-    System.out.println(" ==== assignments: " + Arrays.toString(assignments));
+//    System.out.println(" ==== c len: " + centers.length);
+//    System.out.println(" ==== assignments: " + Arrays.toString(assignments));
 
     for (int i = 0; i < n; i++) {
       float[] vector = dataset.vectorValue(i);
@@ -181,11 +181,14 @@ public final class KMeansLocal {
     int k = initialCenters.length;
     int n = dataset.size();
 
-    float[][] centers = Arrays.copyOf(initialCenters, initialCenters.length);
-    short[] assignments = Arrays.copyOf(initialAssignments, initialAssignments.length);
+//    float[][] centers = Arrays.copyOf(initialCenters, initialCenters.length);
+//    short[] assignments = Arrays.copyOf(initialAssignments, initialAssignments.length);
 
-    System.out.println(" ==== assignments len: " + assignments.length);
-    System.out.println(" ==== assignmentsOrds len: " + assignmentOrdinals.length);
+    float[][] centers = initialCenters;
+    short[] assignments = initialAssignments;
+
+//    System.out.println(" ==== assignments len: " + assignments.length);
+//    System.out.println(" ==== assignmentsOrds len: " + assignmentOrdinals.length);
 
     if (k == 1 || k >= n) {
       // No iterations needed, return the initial state (copied)
@@ -199,7 +202,7 @@ public final class KMeansLocal {
       neighborhoods.add(null);
     }
 
-    System.out.println(" === compute neighborhoods ");
+//    System.out.println(" === compute neighborhoods ");
 
     computeNeighborhoods(centers, neighborhoods, clustersPerNeighborhood);
 
@@ -210,7 +213,7 @@ public final class KMeansLocal {
 
     for (iterationsRun = 0; iterationsRun < maxIterations; iterationsRun++) {
 
-      System.out.println(" === lloyd ");
+//      System.out.println(" === lloyd ");
 
       // Use the neighborhood-aware stepLloyd
       boolean changed = stepLloyd(dataset, neighborhoods, centers, nextCenters, q, assignments);
@@ -220,8 +223,8 @@ public final class KMeansLocal {
       }
     }
 
-    System.out.println(" ==== assignments len 2: " + assignments.length);
-    System.out.println(" ==== assignmentsOrds len 2: " + assignmentOrdinals.length);
+//    System.out.println(" ==== assignments len 2: " + assignments.length);
+//    System.out.println(" ==== assignmentsOrds len 2: " + assignmentOrdinals.length);
 
     // Create the result object - constructor takes ownership of the modified copies
     return new DefaultIVFVectorsWriter.KMeansResult(centers, assignments, assignmentOrdinals, iterationsRun, converged);
