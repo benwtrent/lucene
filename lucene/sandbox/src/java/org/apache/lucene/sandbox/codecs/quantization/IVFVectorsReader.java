@@ -450,25 +450,10 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     IndexInput centroidSlice(IndexInput centroidFile) throws IOException {
       return centroidFile.slice("centroids", centroidOffset, centroidLength);
     }
-
-    //    IndexInput postingsSlice(IndexInput postingsFile, int i) throws IOException {
-    //      return postingsFile.slice(
-    //          "postings-" + i, postingListOffsetsAndLengths[i][0],
-    // postingListOffsetsAndLengths[i][1]);
-    //    }
   }
 
   protected abstract IVFUtils.PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput postingsLists, float[] target, IntPredicate needsScoring)
       throws IOException;
 
-  /**
-   * A record containing the centroid and the index offset for a posting list with the given score
-   */
-  protected record PostingListWithFileOffsetWithScore(
-      PostingListWithFileOffset postingListWithFileOffset, float score) {}
-
-  /** A record containing the centroid and the index offset for a posting list */
-  // TODO UNIFY THESE TYPES BETWEEN WRITERS & READERS
-  public record PostingListWithFileOffset(int centroidOrdinal, long[] fileOffsetAndLength) {}
 }

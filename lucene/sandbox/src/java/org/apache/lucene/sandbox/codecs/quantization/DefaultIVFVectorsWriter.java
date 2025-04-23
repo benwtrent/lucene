@@ -111,23 +111,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
             desiredClusters * 256);
     float[][] centroids = kMeans.centroids();
     // write them
-    OptimizedScalarQuantizer osq =
-        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
-    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
-    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
-    for (float[] centroid : centroids) {
-      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
-      OptimizedScalarQuantizer.QuantizationResult quantizedCentroidResults =
-          osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
-      IVFUtils.writeQuantizedValue(centroidOutput, quantizedScratch, quantizedCentroidResults);
-    }
-    final ByteBuffer buffer =
-        ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
-            .order(ByteOrder.LITTLE_ENDIAN);
-    for (float[] centroid : centroids) {
-      buffer.asFloatBuffer().put(centroid);
-      centroidOutput.writeBytes(buffer.array(), buffer.array().length);
-    }
+    writeCentroids(centroids, fieldInfo, globalCentroid, centroidOutput);
     return new OnHeapCentroidAssignmentScorer(centroids);
   }
 
@@ -230,6 +214,47 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       IndexInput centroidsInput, int numCentroids, FieldInfo fieldInfo, float[] globalCentroid)
       throws IOException {
     return new OffHeapCentroidAssignmentScorer(centroidsInput, numCentroids, fieldInfo);
+  }
+
+  static void writeCentroids(
+      float[][] centroids, FieldInfo fieldInfo, float[] globalCentroid, IndexOutput centroidOutput)
+      throws IOException {
+    final OptimizedScalarQuantizer osq =
+        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
+    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
+    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
+    // TODO do we want to store these distances as well for future use?
+    float[] distances = new float[centroids.length];
+    for (int i = 0; i < centroids.length; i++) {
+      distances[i] = VectorUtil.squareDistance(centroids[i], globalCentroid);
+    }
+    // sort the centroids by distance to globalCentroid, nearest (smallest distance), to furthest
+    // (largest)
+    for (int i = 0; i < centroids.length; i++) {
+      for (int j = i + 1; j < centroids.length; j++) {
+        if (distances[i] > distances[j]) {
+          float[] tmp = centroids[i];
+          centroids[i] = centroids[j];
+          centroids[j] = tmp;
+          float tmpDistance = distances[i];
+          distances[i] = distances[j];
+          distances[j] = tmpDistance;
+        }
+      }
+    }
+    for (float[] centroid : centroids) {
+      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
+      OptimizedScalarQuantizer.QuantizationResult result =
+          osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
+      IVFUtils.writeQuantizedValue(centroidOutput, quantizedScratch, result);
+    }
+    final ByteBuffer buffer =
+        ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
+            .order(ByteOrder.LITTLE_ENDIAN);
+    for (float[] centroid : centroids) {
+      buffer.asFloatBuffer().put(centroid);
+      centroidOutput.writeBytes(buffer.array(), buffer.array().length);
+    }
   }
 
   record SegmentCentroid(int segment, int centroid, int centroidSize) {}
@@ -385,23 +410,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     float[][] centroids = kMeans.centroids();
 
     // write them
-    OptimizedScalarQuantizer osq =
-        new OptimizedScalarQuantizer(fieldInfo.getVectorSimilarityFunction());
-    byte[] quantizedScratch = new byte[fieldInfo.getVectorDimension()];
-    float[] centroidScratch = new float[fieldInfo.getVectorDimension()];
-    for (float[] centroid : centroids) {
-      System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
-      OptimizedScalarQuantizer.QuantizationResult result =
-          osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
-      IVFUtils.writeQuantizedValue(temporaryCentroidOutput, quantizedScratch, result);
-    }
-    final ByteBuffer buffer =
-        ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
-            .order(ByteOrder.LITTLE_ENDIAN);
-    for (float[] centroid : centroids) {
-      buffer.asFloatBuffer().put(centroid);
-      temporaryCentroidOutput.writeBytes(buffer.array(), buffer.array().length);
-    }
+    writeCentroids(centroids, fieldInfo, globalCentroid, temporaryCentroidOutput);
     return centroids.length;
   }
 

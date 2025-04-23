@@ -146,12 +146,6 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     return neighborQueue;
   }
 
-  static void prefixSum(int[] buffer, int count) {
-    for (int i = 1; i < count; ++i) {
-      buffer[i] += buffer[i - 1];
-    }
-  }
-
   @Override
   protected IVFUtils.PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput indexInput, float[] target, IntPredicate needsScoring)
