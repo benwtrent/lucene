@@ -110,7 +110,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
     return rawVectorDelegate;
   }
 
-  protected abstract int calculateAndWriteCentroids(
+  protected abstract Assignments calculateAndWriteCentroids(
       FieldInfo fieldInfo,
       FloatVectorValues floatVectorValues,
       IndexOutput temporaryCentroidOutput,
@@ -223,6 +223,13 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
     return null;
   }
 
+  record Assignments(
+    int numCentroids,
+    short[] assignments,
+    float[] assignmentDistances,
+    short[] soarAssignments,
+    float[] soarAssignmentDistances) {}
+
   @Override
   public final void mergeOneField(FieldInfo fieldInfo, MergeState mergeState) throws IOException {
     rawVectorDelegate.mergeOneField(fieldInfo, mergeState);
@@ -282,9 +289,15 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
               mergeState.segmentInfo.dir.createTempOutput(
                   mergeState.segmentInfo.name, "civf_", IOContext.DEFAULT);
           centroidTempName = centroidTemp.getName();
-          numCentroids =
+
+          // FIXME: need to merge first before wiring this all together
+          Assignments assignments =
               calculateAndWriteCentroids(
                   fieldInfo, floatVectorValues, centroidTemp, mergeState, globalCentroid);
+          numCentroids = assignments.numCentroids;
+//          assignments.assignmentDistances;
+//          assignments.soarAssignmentDistances;
+
           success = true;
         } finally {
           if (success == false && centroidTempName != null) {
