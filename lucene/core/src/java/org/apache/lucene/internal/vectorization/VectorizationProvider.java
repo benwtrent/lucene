@@ -218,6 +218,7 @@ public abstract class VectorizationProvider {
   private static final Set<String> VALID_CALLERS =
       Set.of(
           "org.apache.lucene.sandbox.codecs.quantization.DefaultIVFVectorsReader",
+          "org.apache.lucene.benchmark.jmh.OSQScorerBenchmark",
           "org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil",
           "org.apache.lucene.util.VectorUtil",
           "org.apache.lucene.codecs.lucene101.Lucene101PostingsReader",

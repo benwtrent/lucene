@@ -7,15 +7,21 @@
 package org.apache.lucene.sandbox.search.knn;
 
 import java.io.IOException;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.TopKnnCollector;
+import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.knn.KnnCollectorManager;
 import org.apache.lucene.search.knn.KnnSearchStrategy;
+import org.apache.lucene.util.BitSet;
+import org.apache.lucene.util.Bits;
 
 /** A {@link KnnFloatVectorQuery} that uses the IVF search strategy. */
 public class IVFKnnFloatVectorQuery extends KnnFloatVectorQuery {
@@ -30,6 +36,29 @@ public class IVFKnnFloatVectorQuery extends KnnFloatVectorQuery {
   @Override
   public Query rewrite(IndexSearcher indexSearcher) throws IOException {
     return super.rewrite(indexSearcher);
+  }
+
+  @Override
+  protected TopDocs getLeafResults(
+      LeafReaderContext ctx, Weight filterWeight, KnnCollectorManager knnCollectorManager)
+      throws IOException {
+    final LeafReader reader = ctx.reader();
+    final Bits liveDocs = reader.getLiveDocs();
+
+    if (filterWeight == null) {
+      return approximateSearch(ctx, liveDocs, Integer.MAX_VALUE, knnCollectorManager);
+    }
+
+    Scorer scorer = filterWeight.scorer(ctx);
+    if (scorer == null) {
+      return TopDocsCollector.EMPTY_TOPDOCS;
+    }
+
+    BitSet acceptDocs = createBitSet(scorer.iterator(), liveDocs, reader.maxDoc());
+    final int cost = acceptDocs.cardinality();
+
+    // NEVER DO EXACT SEARCH WITH IVF
+    return approximateSearch(ctx, acceptDocs, cost + 1, knnCollectorManager);
   }
 
   @Override

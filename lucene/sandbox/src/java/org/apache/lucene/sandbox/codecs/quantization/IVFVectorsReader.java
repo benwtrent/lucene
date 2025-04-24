@@ -7,7 +7,6 @@
 package org.apache.lucene.sandbox.codecs.quantization;
 
 import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.SIMILARITY_FUNCTIONS;
-import static org.apache.lucene.sandbox.codecs.quantization.DefaultIVFVectorsReader.prefixSum;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
@@ -36,7 +35,6 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
-import org.apache.lucene.util.GroupVIntUtil;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 
@@ -113,31 +111,11 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   protected abstract FloatVectorValues getCentroids(
       IndexInput indexInput, int numCentroids, FieldInfo info) throws IOException;
 
-  public FloatVectorValues getCentroids(FieldInfo fieldInfo) throws IOException {
-    FieldEntry entry = fields.get(fieldInfo.number);
-    if (entry == null) {
-      return null;
-    }
-    return getCentroids(
-        entry.centroidSlice(ivfCentroids), entry.postingListOffsets.length, fieldInfo);
-  }
-
-  int centroidSize(String fieldName, int centroidOrdinal) throws IOException {
-    FieldInfo fieldInfo = state.fieldInfos.fieldInfo(fieldName);
-    FieldEntry entry = fields.get(fieldInfo.number);
-    ivfClusters.seek(entry.postingListOffsets[centroidOrdinal]);
-    return ivfClusters.readVInt();
-  }
-
-
   record CentroidInfo(CentroidFloatVectorValues vectors, float innerProduct) {}
 
-  CentroidInfo centroidVectors(String fieldName, int segmentOrd, int centroidOrd, MergeState state) throws IOException {
-    IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(state.knnVectorsReaders[segmentOrd], fieldName);
-    if (ivfVectorsReader == null) {
-      return null;
-    }
-    FieldInfo info = state.fieldInfos[segmentOrd].fieldInfo(fieldName);
+  CentroidInfo centroidVectors(String fieldName, int centroidOrd, MergeState.DocMap docMap)
+      throws IOException {
+    FieldInfo info = state.fieldInfos.fieldInfo(fieldName);
     FieldEntry entry = fields.get(info.number);
     if (entry == null) {
       return null;
@@ -145,14 +123,13 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     if (entry.vectorEncoding() == VectorEncoding.BYTE) {
       return null;
     }
-
-    MergeState.DocMap docMap = state.docMaps[segmentOrd];
-    ivfClusters.seek(entry.postingListOffsets[centroidOrd]);
+    ivfClusters.seek(entry.postingListOffsets()[centroidOrd]);
     int vectors = ivfClusters.readVInt();
     float innerProduct = Float.intBitsToFloat(ivfClusters.readInt());
     int[] vectorDocIds = new int[vectors];
-    GroupVIntUtil.readGroupVInts(ivfClusters, vectorDocIds, vectors);
-    prefixSum(vectorDocIds, vectors);
+    DocIdsWriter docIdsWriter = new DocIdsWriter();
+    docIdsWriter.readInts(ivfClusters, vectors, vectorDocIds);
+
     // TODO this assumes that vectorDocIds are sorted!!!
     int count = 0;
     for (int i = 0; i < vectors; i++) {
@@ -162,12 +139,12 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       }
     }
     // TODO: Do we need random access? If so, we should gather the ordinals here by
-    //   iterating the valid docs in the docMap, keeping track of the valid ordinals, then they can be directly
+    //   iterating the valid docs in the docMap, keeping track of the valid ordinals, then they can
+    // be directly
     //   accessed
-    FloatVectorValues vectorValues = ivfVectorsReader.getFloatVectorValues(fieldName);
+    FloatVectorValues vectorValues = getFloatVectorValues(fieldName);
     CentroidFloatVectorValues centroidFloatVectorValues =
-      new CentroidFloatVectorValues(
-        vectorValues, vectorDocIds, docMap, count);
+        new CentroidFloatVectorValues(vectorValues, vectorDocIds, docMap, count);
     return new CentroidInfo(centroidFloatVectorValues, innerProduct);
   }
 
@@ -181,11 +158,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     KnnVectorValues.DocIndexIterator iterator;
 
     CentroidFloatVectorValues(
-      FloatVectorValues vectorValues,
-      int[] docIds,
-      MergeState.DocMap docMap,
-      int size
-    ) {
+        FloatVectorValues vectorValues, int[] docIds, MergeState.DocMap docMap, int size) {
       this.vectorValues = vectorValues;
       this.iterator = vectorValues.iterator();
       this.docIds = docIds;
@@ -194,8 +167,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
 
     CentroidFloatVectorValues copy() throws IOException {
-      return new CentroidFloatVectorValues(
-        vectorValues.copy(), docIds, docMap, size);
+      return new CentroidFloatVectorValues(vectorValues.copy(), docIds, docMap, size);
     }
 
     int docId() {
@@ -220,6 +192,22 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       }
       return this.mappedDocID = NO_MORE_DOCS;
     }
+  }
+
+  public FloatVectorValues getCentroids(FieldInfo fieldInfo) throws IOException {
+    FieldEntry entry = fields.get(fieldInfo.number);
+    if (entry == null) {
+      return null;
+    }
+    return getCentroids(
+        entry.centroidSlice(ivfCentroids), entry.postingListOffsets.length, fieldInfo);
+  }
+
+  int centroidSize(String fieldName, int centroidOrdinal) throws IOException {
+    FieldInfo fieldInfo = state.fieldInfos.fieldInfo(fieldName);
+    FieldEntry entry = fields.get(fieldInfo.number);
+    ivfClusters.seek(entry.postingListOffsets[centroidOrdinal]);
+    return ivfClusters.readVInt();
   }
 
   private static IndexInput openDataInput(
@@ -364,6 +352,12 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     if (knnCollector.getSearchStrategy() instanceof IVFKnnSearchStrategy ivfStrategy) {
       nProbe = ivfStrategy.getNProbe();
     }
+    float percentFiltered = 1f;
+    if (acceptDocs instanceof BitSet bitSet) {
+      percentFiltered =
+          Math.max(0f, Math.min(1f, (float) bitSet.approximateCardinality() / bitSet.length()));
+    }
+    int numVectors = rawVectorsReader.getFloatVectorValues(field).size();
     BitSet visitedDocs = new FixedBitSet(state.segmentInfo.maxDoc() + 1);
     // TODO can we make a conjunction between idSetIterator and the acceptDocs?
     IntPredicate needsScoring =
@@ -403,20 +397,17 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
           scorer.resetPostingsScorer(
               centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
       actualDocs += scorer.visit(knnCollector);
-      if (knnCollector.earlyTerminated()) {
-        return;
-      }
     }
-    // if we are using a filtered search, we need to account for the documents that were filtered
-    // so continue exploring past centroidsToSearch until we reach the expected number of documents
-    // TODO, can we pick something smarter than 0.9? Something related to average posting list size?
-    float expectedScored = expectedDocs * 0.9f;
-    while (acceptDocs != null && centroidQueue.size() > 0 && actualDocs < expectedScored) {
-      int centroidOrdinal = centroidQueue.pop();
-      scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
-      actualDocs += scorer.visit(knnCollector);
-      if (knnCollector.earlyTerminated()) {
-        return;
+    if (acceptDocs != null) {
+      float unfilteredRatioVisited = (float) expectedDocs / numVectors;
+      int filteredVectors = (int) Math.ceil(numVectors * percentFiltered);
+      float expectedScored =
+          Math.min(2 * filteredVectors * unfilteredRatioVisited, expectedDocs / 2f);
+      while (centroidQueue.size() > 0
+          && (actualDocs < expectedScored || actualDocs < knnCollector.k())) {
+        int centroidOrdinal = centroidQueue.pop();
+        scorer.resetPostingsScorer(centroidOrdinal, centroidQueryScorer.centroid(centroidOrdinal));
+        actualDocs += scorer.visit(knnCollector);
       }
     }
   }
@@ -459,25 +450,10 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     IndexInput centroidSlice(IndexInput centroidFile) throws IOException {
       return centroidFile.slice("centroids", centroidOffset, centroidLength);
     }
-
-    //    IndexInput postingsSlice(IndexInput postingsFile, int i) throws IOException {
-    //      return postingsFile.slice(
-    //          "postings-" + i, postingListOffsetsAndLengths[i][0],
-    // postingListOffsetsAndLengths[i][1]);
-    //    }
   }
 
   protected abstract IVFUtils.PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput postingsLists, float[] target, IntPredicate needsScoring)
       throws IOException;
 
-  /**
-   * A record containing the centroid and the index offset for a posting list with the given score
-   */
-  protected record PostingListWithFileOffsetWithScore(
-      PostingListWithFileOffset postingListWithFileOffset, float score) {}
-
-  /** A record containing the centroid and the index offset for a posting list */
-  // TODO UNIFY THESE TYPES BETWEEN WRITERS & READERS
-  public record PostingListWithFileOffset(int centroidOrdinal, long[] fileOffsetAndLength) {}
 }
