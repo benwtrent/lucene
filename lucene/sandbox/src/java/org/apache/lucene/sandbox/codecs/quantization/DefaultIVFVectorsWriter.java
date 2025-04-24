@@ -197,7 +197,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       byte[] binaryValue = binarizedByteVectorValues.vectorValue(ord);
       OptimizedScalarQuantizer.QuantizationResult corrections =
           binarizedByteVectorValues.getCorrectiveTerms(ord);
-      IVFUtils.writeQuantizedValue(postingsOutput, binaryValue, corrections);
+      writeQuantizedValue(postingsOutput, binaryValue, corrections);
       binarizedByteVectorValues.getCorrectiveTerms(ord);
       postingsOutput.writeBytes(binaryValue, 0, binaryValue.length);
       postingsOutput.writeInt(Float.floatToIntBits(corrections.lowerInterval()));
@@ -246,7 +246,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       System.arraycopy(centroid, 0, centroidScratch, 0, centroid.length);
       OptimizedScalarQuantizer.QuantizationResult result =
           osq.scalarQuantize(centroidScratch, quantizedScratch, (byte) 4, globalCentroid);
-      IVFUtils.writeQuantizedValue(centroidOutput, quantizedScratch, result);
+      writeQuantizedValue(centroidOutput, quantizedScratch, result);
     }
     final ByteBuffer buffer =
         ByteBuffer.allocate(fieldInfo.getVectorDimension() * Float.BYTES)
@@ -278,7 +278,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     int segmentIdx = 0;
     long startTime = System.nanoTime();
     for (var reader : mergeState.knnVectorsReaders) {
-      IVFVectorsReader ivfVectorsReader = IVFUtils.getIVFReader(reader, fieldInfo.name);
+      IVFVectorsReader ivfVectorsReader = IVFVectorsFormat.getIVFReader(reader, fieldInfo.name);
       if (ivfVectorsReader == null) {
         continue;
       }
@@ -890,5 +890,19 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     public float score(int centroidOrdinal) throws IOException {
       return VectorUtil.squareDistance(centroid(centroidOrdinal), q);
     }
+  }
+
+  static void writeQuantizedValue(
+      IndexOutput indexOutput,
+      byte[] binaryValue,
+      OptimizedScalarQuantizer.QuantizationResult corrections)
+      throws IOException {
+    indexOutput.writeBytes(binaryValue, binaryValue.length);
+    indexOutput.writeInt(Float.floatToIntBits(corrections.lowerInterval()));
+    indexOutput.writeInt(Float.floatToIntBits(corrections.upperInterval()));
+    indexOutput.writeInt(Float.floatToIntBits(corrections.additionalCorrection()));
+    assert corrections.quantizedComponentSum() >= 0
+        && corrections.quantizedComponentSum() <= 0xffff;
+    indexOutput.writeShort((short) corrections.quantizedComponentSum());
   }
 }

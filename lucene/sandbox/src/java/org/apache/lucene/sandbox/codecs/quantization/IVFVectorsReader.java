@@ -455,5 +455,4 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   protected abstract IVFUtils.PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput postingsLists, float[] target, IntPredicate needsScoring)
       throws IOException;
-
 }

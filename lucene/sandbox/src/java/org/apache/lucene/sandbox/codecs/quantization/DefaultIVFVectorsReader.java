@@ -90,7 +90,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         }
         centroids.seek(centroidOrdinal * centroidByteSize);
         quantizedCentroidComponentSum =
-            IVFUtils.readQuantizedValue(centroids, quantizedCentroid, centroidCorrectiveValues);
+            readQuantizedValue(centroids, quantizedCentroid, centroidCorrectiveValues);
         centroids.seek(
             numCentroids * centroidByteSize
                 + (long) Float.BYTES * quantizedCentroid.length * centroidOrdinal);
@@ -424,5 +424,15 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
         quantized = true;
       }
     }
+  }
+
+  static int readQuantizedValue(IndexInput indexInput, byte[] binaryValue, float[] corrections)
+      throws IOException {
+    assert corrections.length == 3;
+    indexInput.readBytes(binaryValue, 0, binaryValue.length);
+    corrections[0] = Float.intBitsToFloat(indexInput.readInt());
+    corrections[1] = Float.intBitsToFloat(indexInput.readInt());
+    corrections[2] = Float.intBitsToFloat(indexInput.readInt());
+    return Short.toUnsignedInt(indexInput.readShort());
   }
 }
