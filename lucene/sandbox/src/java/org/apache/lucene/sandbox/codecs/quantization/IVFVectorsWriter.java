@@ -313,6 +313,8 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
                   fieldInfo, floatVectorValues, centroidTemp, mergeState, globalCentroid);
           numCentroids = assignments.numCentroids;
 
+          long startTime = System.nanoTime();
+
           for(int i = 0; i < assignments.assignments.length; i++) {
             sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments.assignments[i], assignments.assignmentDistances[i], false));
           }
@@ -320,6 +322,8 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
           for(int i = 0; i < assignments.soarAssignments.length; i++) {
             sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments.soarAssignments[i], assignments.soarAssignmentDistances[i], true));
           }
+
+          System.out.println(" ==== sort assignments ms: " + (System.nanoTime() - startTime) / 1000000.0);
 
           success = true;
         } finally {

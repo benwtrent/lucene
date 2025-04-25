@@ -163,17 +163,10 @@ public final class KMeansLocal {
 
       short currJd = assignments[i];
       float[] c1 = centers[currJd];
-      float d1sq = 0.0f;
-      for(int j = 0; j < vectors.dimension(); j++) {
-        float diff = xi[j] - c1[j];
-        d1[j] = diff;
-        d1sq += diff * diff;
-      }
+      float d1sq = VectorUtil.squareDistance(xi, c1);
 
       short bestJd = 0;
-
       float minSoar = Float.MAX_VALUE;
-
       for(short jd : neighborhoods.get(currJd)) {
         float[] cj = centers[jd];
         float soar = distanceSoar(d1, xi, cj, d1sq);
@@ -235,7 +228,12 @@ public final class KMeansLocal {
     short[] spilledAssignments = new short[assignments.length];
     int[] spilledAssignmentOrds = new int[assignmentOrds.length];
     float[] spilledDistances = new float[assignments.length];
+
+    long startTime = System.nanoTime();
+
     assignSpilled(dataset, neighborhoods, centers, assignments, spilledAssignments, spilledDistances);
+
+    System.out.println(" ==== assign soar ms: " + (System.nanoTime() - startTime) / 1000000.0);
 
     return new DefaultIVFVectorsWriter.KMeansResult(centers,
       assignments, assignmentOrds, assignmentDistances,

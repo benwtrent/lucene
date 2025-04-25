@@ -267,8 +267,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     }
   }
 
-  record SegmentCentroid(int segment, int centroid, int centroidSize) {}
-
   public static class KMeansResult {
     public float[][] centroids;
     public short[] assignments;
@@ -291,12 +289,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       this.iterationsRun = iterationsRun;
       this.converged = converged;
     }
-    public KMeansResult(float[][] centroids, short[] assignments, int[] assignmentOrds, float[] assignmentDistances, short[] soarAssignments, int[] soarAssignmentOrds, float[] soarAssignmentDistances) {
-      this(centroids, assignments, assignmentOrds, assignmentDistances, soarAssignments, soarAssignmentOrds, soarAssignmentDistances, 0, false);
-    }
-    public KMeansResult(float[][] centroids, short[] assignments, float[] assignmentDistances, short[] soarAssignments, float[] soarAssignmentDistances) {
-      this(centroids, assignments, IntStream.range(0, assignments.length).toArray(), assignmentDistances, soarAssignments, IntStream.range(0, assignments.length).toArray(), soarAssignmentDistances, 0, false);
-    }
     public KMeansResult(float[][] centroids, short[] assignments, float[] assignmentDistances) {
       this(centroids, assignments, IntStream.range(0, assignments.length).toArray(), assignmentDistances, null, null, null, 0, false);
     }
@@ -306,9 +298,9 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   public static KMeansResult kMeansHierarchical(FieldInfo fieldInfo, float[][] initialCentroids, short[] initialAssignments, FloatVectorValues vectors, int desiredClusters) throws IOException {
-    int maxIterations = 6;
-    int samplesPerCluster = 256;
-    short clustersPerNeighborhood = MAXK;
+    int maxIterations = 8;
+    int samplesPerCluster = 128;
+    short clustersPerNeighborhood = 32;
     int depth = 0;
 
     int targetSize = (int) (vectors.size() / (float) desiredClusters);
@@ -331,6 +323,9 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
     float[][] centroids;
     if(initialCentroids == null) {
+
+      long startTime = System.nanoTime();
+
       final KMeans.Results kMeans =
         KMeans.cluster(
           vectors,
@@ -344,11 +339,15 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
           maxIterations,
           m);
       centroids = kMeans.centroids();
+
+      System.out.println(" ==== kmeans ms: " + (System.nanoTime() - startTime) / 1000000.0);
     } else {
       centroids = initialCentroids;
     }
 
     int[] clusterSizes = new int[centroids.length];
+
+    long startTime2 = System.nanoTime();
 
     for(int i = 0; i < vectors.size(); i++) {
       float smallest = Float.MAX_VALUE;
@@ -370,6 +369,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       assignmentDistances[i] = smallest;
       clusterSizes[centroidIdx]++;
     }
+
+    System.out.println(" ==== assignment ms: " + (System.nanoTime() - startTime2) / 1000000.0);
 
     short effectiveK = 0;
     for(int i = 0; i < clusterSizes.length; i++) {
@@ -408,9 +409,13 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
           kMeansResult.soarAssignmentOrds, kMeansResult.soarAssignmentDistances,
           0, true);
       } else {
+        long startTime = System.nanoTime();
+
         kMeansResult = KMeansLocal.kMeansLocal(vectors, kMeansResult.centroids,
           kMeansResult.assignments, kMeansResult.assignmentOrds, kMeansResult.assignmentDistances,
           clustersPerNeighborhood, maxIterations);
+
+        System.out.println(" ==== local kmeans ms: " + (System.nanoTime() - startTime) / 1000000.0);
       }
     }
 
