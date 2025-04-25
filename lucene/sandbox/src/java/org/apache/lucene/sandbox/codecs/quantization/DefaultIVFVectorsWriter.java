@@ -58,34 +58,14 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected IVFUtils.CentroidAssignmentScorer calculateAndWriteCentroids(
+  CentroidAssignmentScorer calculateAndWriteCentroids(
       FieldInfo fieldInfo,
       FloatVectorValues floatVectorValues,
       IndexOutput centroidOutput,
       float[] globalCentroid)
       throws IOException {
     if (floatVectorValues.size() == 0) {
-      return new IVFUtils.CentroidAssignmentScorer() {
-        @Override
-        public int size() {
-          return 0;
-        }
-
-        @Override
-        public float[] centroid(int centroidOrdinal) {
-          throw new IllegalStateException("No centroids");
-        }
-
-        @Override
-        public float score(int centroidOrdinal) {
-          throw new IllegalStateException("No centroids");
-        }
-
-        @Override
-        public void setScoringVector(float[] vector) {
-          throw new IllegalStateException("No centroids");
-        }
-      };
+      return CentroidAssignmentScorer.EMPTY;
     }
     // calculate the centroids
     int maxNumClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
@@ -116,10 +96,10 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected long[] buildAndWritePostingsLists(
+  long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
       InfoStream infoStream,
-      IVFUtils.CentroidAssignmentScorer randomCentroidScorer,
+      CentroidAssignmentScorer randomCentroidScorer,
       FloatVectorValues floatVectorValues,
       IndexOutput postingsOutput)
       throws IOException {
@@ -210,7 +190,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected IVFUtils.CentroidAssignmentScorer createCentroidScorer(
+  CentroidAssignmentScorer createCentroidScorer(
       IndexInput centroidsInput, int numCentroids, FieldInfo fieldInfo, float[] globalCentroid)
       throws IOException {
     return new OffHeapCentroidAssignmentScorer(centroidsInput, numCentroids, fieldInfo);
@@ -415,9 +395,9 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   @Override
-  protected long[] buildAndWritePostingsLists(
+  long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
-      IVFUtils.CentroidAssignmentScorer centroidAssignmentScorer,
+      CentroidAssignmentScorer centroidAssignmentScorer,
       FloatVectorValues floatVectorValues,
       IndexOutput postingsOutput,
       MergeState mergeState)
@@ -503,7 +483,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   static void assignCentroids(
-      IVFUtils.CentroidAssignmentScorer scorer, FloatVectorValues vectors, IntArrayList[] clusters)
+      CentroidAssignmentScorer scorer, FloatVectorValues vectors, IntArrayList[] clusters)
       throws IOException {
     short numCentroids = (short) scorer.size();
     // If soar > 0, then we actually need to apply the projection, otherwise, its just the second
@@ -562,7 +542,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   static int prefilterCentroidAssignment(
       int centroidOrd,
       FloatVectorValues segmentCentroids,
-      IVFUtils.CentroidAssignmentScorer scorer,
+      CentroidAssignmentScorer scorer,
       NeighborQueue neighborsToCheck,
       int[] prefilteredCentroids)
       throws IOException {
@@ -579,7 +559,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   static void assignCentroidsMerge(
-      IVFUtils.CentroidAssignmentScorer scorer,
+      CentroidAssignmentScorer scorer,
       FloatVectorValues vectors,
       MergeState state,
       String fieldName,
@@ -712,7 +692,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       float[] bestCentroid,
       float bestScore,
       float[] scratch,
-      IVFUtils.CentroidAssignmentScorer scorer,
+      CentroidAssignmentScorer scorer,
       FloatVectorValues vectors,
       IntArrayList[] clusters)
       throws IOException {
@@ -817,7 +797,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     }
   }
 
-  static class OffHeapCentroidAssignmentScorer implements IVFUtils.CentroidAssignmentScorer {
+  static class OffHeapCentroidAssignmentScorer implements CentroidAssignmentScorer {
     private final IndexInput centroidsInput;
     private final int numCentroids;
     private final int dimension;
@@ -831,7 +811,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       this.numCentroids = numCentroids;
       this.dimension = info.getVectorDimension();
       this.scratch = new float[dimension];
-      this.centroidByteSize = IVFUtils.calculateByteLength(dimension, (byte) 4);
+      this.centroidByteSize = dimension + 3 * Float.BYTES + Short.BYTES;
     }
 
     @Override
@@ -863,7 +843,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   // TODO throw away rawCentroids
-  static class OnHeapCentroidAssignmentScorer implements IVFUtils.CentroidAssignmentScorer {
+  static class OnHeapCentroidAssignmentScorer implements CentroidAssignmentScorer {
     private final float[][] centroids;
     private float[] q;
 

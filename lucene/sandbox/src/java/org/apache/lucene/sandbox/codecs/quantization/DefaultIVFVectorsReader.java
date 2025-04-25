@@ -48,7 +48,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   @Override
-  protected IVFUtils.CentroidQueryScorer getCentroidScorer(
+  protected CentroidQueryScorer getCentroidScorer(
       FieldInfo fieldInfo,
       int numCentroids,
       IndexInput centroids,
@@ -64,14 +64,14 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     float[] targetScratch = ArrayUtil.copyArray(targetQuery);
     OptimizedScalarQuantizer.QuantizationResult queryParams =
         scalarQuantizer.scalarQuantize(targetScratch, quantized, (byte) 4, globalCentroid);
-    return new IVFUtils.CentroidQueryScorer() {
+    return new CentroidQueryScorer() {
       int currentCentroid = -1;
       private final byte[] quantizedCentroid = new byte[fieldInfo.getVectorDimension()];
       private final float[] centroid = new float[fieldInfo.getVectorDimension()];
       private final float[] centroidCorrectiveValues = new float[3];
       private int quantizedCentroidComponentSum;
       private final long centroidByteSize =
-          IVFUtils.calculateByteLength(fieldInfo.getVectorDimension(), (byte) 4);
+          fieldInfo.getVectorDimension() + 3 * Float.BYTES + Short.BYTES;
 
       @Override
       public int size() {
@@ -126,10 +126,10 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   @Override
-  protected NeighborQueue scorePostingLists(
+  NeighborQueue scorePostingLists(
       FieldInfo fieldInfo,
       KnnCollector knnCollector,
-      IVFUtils.CentroidQueryScorer centroidQueryScorer,
+      CentroidQueryScorer centroidQueryScorer,
       int nProbe)
       throws IOException {
     if (knnCollector.getSearchStrategy() instanceof IVFKnnSearchStrategy searchStrategy) {
@@ -147,7 +147,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
   }
 
   @Override
-  protected IVFUtils.PostingVisitor getPostingVisitor(
+  PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput indexInput, float[] target, IntPredicate needsScoring)
       throws IOException {
     FieldEntry entry = fields.get(fieldInfo.number);
@@ -200,7 +200,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       this.input = input;
       this.dimension = dimension;
       this.centroid = new float[dimension];
-      this.centroidByteSize = IVFUtils.calculateByteLength(dimension, (byte) 4);
+      this.centroidByteSize = dimension + 3 * Float.BYTES + Short.BYTES;
     }
 
     @Override
@@ -241,7 +241,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
     }
   }
 
-  private static class MemorySegmentPostingsVisitor extends IVFUtils.PostingVisitor {
+  private static class MemorySegmentPostingsVisitor implements PostingVisitor {
     final long quantizedByteLength;
     final IndexInput indexInput;
     final float[] target;

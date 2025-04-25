@@ -100,7 +100,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
   }
 
-  protected abstract IVFUtils.CentroidQueryScorer getCentroidScorer(
+  abstract CentroidQueryScorer getCentroidScorer(
       FieldInfo fieldInfo,
       int numCentroids,
       IndexInput centroids,
@@ -164,10 +164,6 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       this.docIds = docIds;
       this.docMap = docMap;
       this.size = size;
-    }
-
-    CentroidFloatVectorValues copy() throws IOException {
-      return new CentroidFloatVectorValues(vectorValues.copy(), docIds, docMap, size);
     }
 
     int docId() {
@@ -369,7 +365,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
         };
 
     FieldEntry entry = fields.get(fieldInfo.number);
-    IVFUtils.CentroidQueryScorer centroidQueryScorer =
+    CentroidQueryScorer centroidQueryScorer =
         getCentroidScorer(
             fieldInfo,
             entry.postingListOffsets.length,
@@ -382,8 +378,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
     final NeighborQueue centroidQueue =
         scorePostingLists(fieldInfo, knnCollector, centroidQueryScorer, nProbe);
-    IVFUtils.PostingVisitor scorer =
-        getPostingVisitor(fieldInfo, ivfClusters, target, needsScoring);
+    PostingVisitor scorer = getPostingVisitor(fieldInfo, ivfClusters, target, needsScoring);
     int centroidsVisited = 0;
     long expectedDocs = 0;
     long actualDocs = 0;
@@ -430,7 +425,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   abstract NeighborQueue scorePostingLists(
       FieldInfo fieldInfo,
       KnnCollector knnCollector,
-      IVFUtils.CentroidQueryScorer centroidQueryScorer,
+      CentroidQueryScorer centroidQueryScorer,
       int nProbe)
       throws IOException;
 
@@ -452,7 +447,25 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
   }
 
-  protected abstract IVFUtils.PostingVisitor getPostingVisitor(
+  abstract PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput postingsLists, float[] target, IntPredicate needsScoring)
       throws IOException;
+
+  interface CentroidQueryScorer {
+    int size();
+
+    float[] centroid(int centroidOrdinal) throws IOException;
+
+    float score(int centroidOrdinal) throws IOException;
+  }
+
+  interface PostingVisitor {
+    // TODO maybe we can not specifically pass the centroid...
+
+    /** returns the number of documents in the posting list */
+    int resetPostingsScorer(int centroidOrdinal, float[] centroid) throws IOException;
+
+    /** returns the number of scored documents */
+    int visit(KnnCollector collector) throws IOException;
+  }
 }

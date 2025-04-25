@@ -118,30 +118,30 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
       float[] globalCentroid)
       throws IOException;
 
-  protected abstract long[] buildAndWritePostingsLists(
+  abstract long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
-      IVFUtils.CentroidAssignmentScorer scorer,
+      CentroidAssignmentScorer scorer,
       FloatVectorValues floatVectorValues,
       IndexOutput postingsOutput,
       MergeState mergeState)
       throws IOException;
 
-  protected abstract IVFUtils.CentroidAssignmentScorer calculateAndWriteCentroids(
+  abstract CentroidAssignmentScorer calculateAndWriteCentroids(
       FieldInfo fieldInfo,
       FloatVectorValues floatVectorValues,
       IndexOutput centroidOutput,
       float[] globalCentroid)
       throws IOException;
 
-  protected abstract long[] buildAndWritePostingsLists(
+  abstract long[] buildAndWritePostingsLists(
       FieldInfo fieldInfo,
       InfoStream infoStream,
-      IVFUtils.CentroidAssignmentScorer scorer,
+      CentroidAssignmentScorer scorer,
       FloatVectorValues floatVectorValues,
       IndexOutput postingsOutput)
       throws IOException;
 
-  protected abstract IVFUtils.CentroidAssignmentScorer createCentroidScorer(
+  abstract CentroidAssignmentScorer createCentroidScorer(
       IndexInput centroidsInput, int numCentroids, FieldInfo fieldInfo, float[] globalCentroid)
       throws IOException;
 
@@ -156,7 +156,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
           getFloatVectorValues(fieldWriter.fieldInfo, fieldWriter.delegate, maxDoc);
       // build centroids
       long centroidOffset = ivfCentroids.alignFilePointer(Float.BYTES);
-      final IVFUtils.CentroidAssignmentScorer centroidAssignmentScorer =
+      final CentroidAssignmentScorer centroidAssignmentScorer =
           calculateAndWriteCentroids(
               fieldWriter.fieldInfo, floatVectorValues, ivfCentroids, globalCentroid);
       long centroidLength = ivfCentroids.getFilePointer() - centroidOffset;
@@ -271,7 +271,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
       try (IndexInput in = mergeState.segmentInfo.dir.openInput(name, IOContext.DEFAULT)) {
         final FloatVectorValues floatVectorValues = getFloatVectorValues(fieldInfo, in, numVectors);
         success = false;
-        IVFUtils.CentroidAssignmentScorer centroidAssignmentScorer;
+        CentroidAssignmentScorer centroidAssignmentScorer;
         long centroidOffset;
         long centroidLength;
         String centroidTempName = null;
@@ -458,4 +458,37 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
   }
 
   private record FieldWriter(FieldInfo fieldInfo, FlatFieldVectorsWriter<float[]> delegate) {}
+
+  interface CentroidAssignmentScorer {
+    CentroidAssignmentScorer EMPTY =
+        new CentroidAssignmentScorer() {
+          @Override
+          public int size() {
+            return 0;
+          }
+
+          @Override
+          public float[] centroid(int centroidOrdinal) {
+            throw new IllegalStateException("No centroids");
+          }
+
+          @Override
+          public float score(int centroidOrdinal) {
+            throw new IllegalStateException("No centroids");
+          }
+
+          @Override
+          public void setScoringVector(float[] vector) {
+            throw new IllegalStateException("No centroids");
+          }
+        };
+
+    int size();
+
+    float[] centroid(int centroidOrdinal) throws IOException;
+
+    void setScoringVector(float[] vector);
+
+    float score(int centroidOrdinal) throws IOException;
+  }
 }
