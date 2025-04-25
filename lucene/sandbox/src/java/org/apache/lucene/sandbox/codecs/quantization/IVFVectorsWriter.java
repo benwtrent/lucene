@@ -14,7 +14,13 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
+
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.KnnFieldVectorsWriter;
 import org.apache.lucene.codecs.KnnVectorsReader;
@@ -31,7 +37,9 @@ import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Sorter;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.index.VectorSimilarityFunction;
+import org.apache.lucene.sandbox.facet.utils.ComparableUtils;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.Sort;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
@@ -123,7 +131,8 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
       IVFUtils.CentroidAssignmentScorer scorer,
       FloatVectorValues floatVectorValues,
       IndexOutput postingsOutput,
-      MergeState mergeState)
+      MergeState mergeState,
+      Set<SortedAssignment> sortedAssignments)
       throws IOException;
 
   protected abstract IVFUtils.CentroidAssignmentScorer calculateAndWriteCentroids(
@@ -230,6 +239,13 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
     short[] soarAssignments,
     float[] soarAssignmentDistances) {}
 
+  public record SortedAssignment(int docId, short centroid, float distance, boolean isSoar) implements Comparable<SortedAssignment> {
+    @Override
+    public int compareTo(SortedAssignment o) {
+      return Float.compare(this.distance, o.distance);
+    }
+  }
+
   @Override
   public final void mergeOneField(FieldInfo fieldInfo, MergeState mergeState) throws IOException {
     rawVectorDelegate.mergeOneField(fieldInfo, mergeState);
@@ -284,6 +300,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
         String centroidTempName = null;
         int numCentroids;
         IndexOutput centroidTemp = null;
+        Set<SortedAssignment> sortedAssignments = new TreeSet<>();
         try {
           centroidTemp =
               mergeState.segmentInfo.dir.createTempOutput(
@@ -295,8 +312,14 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
               calculateAndWriteCentroids(
                   fieldInfo, floatVectorValues, centroidTemp, mergeState, globalCentroid);
           numCentroids = assignments.numCentroids;
-//          assignments.assignmentDistances;
-//          assignments.soarAssignmentDistances;
+
+          for(int i = 0; i < assignments.assignments.length; i++) {
+            sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments.assignments[i], assignments.assignmentDistances[i], false));
+          }
+
+          for(int i = 0; i < assignments.soarAssignments.length; i++) {
+            sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments.soarAssignments[i], assignments.soarAssignmentDistances[i], true));
+          }
 
           success = true;
         } finally {
@@ -332,7 +355,8 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
                     centroidAssignmentScorer,
                     floatVectorValues,
                     ivfClusters,
-                    mergeState);
+                    mergeState,
+                    sortedAssignments);
             // write posting lists
 
             // TODO handle this correctly by creating new centroid
