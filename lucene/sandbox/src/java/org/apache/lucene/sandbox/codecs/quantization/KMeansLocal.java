@@ -14,6 +14,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.PriorityQueue;
 
+import static java.lang.Math.fma;
+
 public final class KMeansLocal {
     private record NeighborInfo(float distanceSq, short offset) implements Comparable<NeighborInfo> {
 
@@ -164,7 +166,14 @@ public final class KMeansLocal {
       float[] xi = vectors.vectorValue(i);
 
       short currJd = assignments[i];
-      float d1sq = assignmentDistances[i];
+      float[] c1 = centers[currJd];
+      float d1sq = 0f;
+      for (int j = 0; j < vectors.dimension(); j++) {
+        float diff = xi[j] - c1[j];
+        d1[j] = diff;
+        d1sq = fma(diff, diff, d1sq);
+      }
+//      float d1sq = assignmentDistances[i];
 
       short bestJd = 0;
       float minSoar = Float.MAX_VALUE;
