@@ -167,13 +167,13 @@ public final class KMeansLocal {
 
       short currJd = assignments[i];
       float[] c1 = centers[currJd];
-      float d1sq = 0f;
+//      float d1sq = 0f;
       for (int j = 0; j < vectors.dimension(); j++) {
         float diff = xi[j] - c1[j];
         d1[j] = diff;
-        d1sq = fma(diff, diff, d1sq);
+//        d1sq = fma(diff, diff, d1sq);
       }
-//      float d1sq = assignmentDistances[i];
+      float d1sq = assignmentDistances[i];
 
       short bestJd = 0;
       float minSoar = Float.MAX_VALUE;
