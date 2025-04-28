@@ -147,7 +147,9 @@ public final class KMeansLocal {
     return changed;
   }
 
-  static void assignSpilled(FloatVectorValuesSlice vectors, List<short[]> neighborhoods, float[][] centers, short[] assignments, short[] spilledAssignments, float[] spilledDistances) throws IOException {
+  static void assignSpilled(FloatVectorValuesSlice vectors, List<short[]> neighborhoods,
+                            float[][] centers, short[] assignments, float[] assignmentDistances,
+                            short[] spilledAssignments, float[] spilledDistances) throws IOException {
     // SOAR uses an adjusted distance for assigning spilled documents which is
     // given by:
     //
@@ -162,8 +164,7 @@ public final class KMeansLocal {
       float[] xi = vectors.vectorValue(i);
 
       short currJd = assignments[i];
-      float[] c1 = centers[currJd];
-      float d1sq = VectorUtil.squareDistance(xi, c1);
+      float d1sq = assignmentDistances[i];
 
       short bestJd = 0;
       float minSoar = Float.MAX_VALUE;
@@ -183,17 +184,10 @@ public final class KMeansLocal {
 
   static float distanceSoar(float[] r, float[] x, float[] c, float rnorm) {
     float lambda = 1.0F;
-
-    float dsq = 0.0f;
-    float rproj = 0.0f;
-
-    for(int d = 0; d < x.length; d++) {
-      float diff = x[d] - c[d];
-      dsq += diff * diff;
-      rproj += r[d] * diff;
-    }
-
-    return dsq * lambda * rproj * rproj / rnorm;
+    // FIXME: can probably combine these to be more efficient
+    float dsq = VectorUtil.squareDistance(x, c);
+    float rproj = VectorUtil.soarResidual(x, c, r);
+    return dsq + lambda * rproj * rproj / rnorm;
   }
 
   public static DefaultIVFVectorsWriter.KMeansResult kMeansLocal(FloatVectorValuesSlice dataset,
@@ -226,18 +220,12 @@ public final class KMeansLocal {
     }
 
     short[] spilledAssignments = new short[assignments.length];
-    int[] spilledAssignmentOrds = new int[assignmentOrds.length];
     float[] spilledDistances = new float[assignments.length];
-
-    long startTime = System.nanoTime();
-
-    assignSpilled(dataset, neighborhoods, centers, assignments, spilledAssignments, spilledDistances);
-
-    System.out.println(" ==== assign soar ms: " + (System.nanoTime() - startTime) / 1000000.0);
+    assignSpilled(dataset, neighborhoods, centers, assignments, assignmentDistances, spilledAssignments, spilledDistances);
 
     return new DefaultIVFVectorsWriter.KMeansResult(centers,
       assignments, assignmentOrds, assignmentDistances,
-      spilledAssignments, spilledAssignmentOrds, spilledDistances,
+      spilledAssignments, spilledDistances,
       iterationsRun, converged);
   }
 }

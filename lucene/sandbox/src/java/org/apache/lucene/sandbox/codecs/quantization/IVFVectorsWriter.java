@@ -323,7 +323,8 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
             sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments.soarAssignments[i], assignments.soarAssignmentDistances[i], true));
           }
 
-          System.out.println(" ==== sort assignments ms: " + (System.nanoTime() - startTime) / 1000000.0);
+          // FIXME: remove me
+//          System.out.println(" ==== sort assignments ms: " + (System.nanoTime() - startTime) / 1000000.0);
 
           success = true;
         } finally {
