@@ -118,7 +118,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
     return rawVectorDelegate;
   }
 
-  protected abstract Assignments calculateAndWriteCentroids(
+  protected abstract SortedAssignments calculateAndWriteCentroids(
       FieldInfo fieldInfo,
       FloatVectorValues floatVectorValues,
       IndexOutput temporaryCentroidOutput,
@@ -232,12 +232,9 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
     return null;
   }
 
-  record Assignments(
+  record SortedAssignments(
     int numCentroids,
-    short[] assignments,
-    float[] assignmentDistances,
-    short[] soarAssignments,
-    float[] soarAssignmentDistances) {}
+    Set<SortedAssignment> assignments) {}
 
   public record SortedAssignment(int docId, short centroid, float distance, boolean isSoar) implements Comparable<SortedAssignment> {
     @Override
@@ -300,7 +297,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
         String centroidTempName = null;
         int numCentroids;
         IndexOutput centroidTemp = null;
-        Set<SortedAssignment> sortedAssignments = new TreeSet<>();
+        Set<SortedAssignment> sortedAssignments;
         try {
           centroidTemp =
               mergeState.segmentInfo.dir.createTempOutput(
@@ -308,23 +305,11 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
           centroidTempName = centroidTemp.getName();
 
           // FIXME: need to merge first before wiring this all together
-          Assignments assignments =
+          SortedAssignments assignments =
               calculateAndWriteCentroids(
                   fieldInfo, floatVectorValues, centroidTemp, mergeState, globalCentroid);
           numCentroids = assignments.numCentroids;
-
-          long startTime = System.nanoTime();
-
-          for(int i = 0; i < assignments.assignments.length; i++) {
-            sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments.assignments[i], assignments.assignmentDistances[i], false));
-          }
-
-          for(int i = 0; i < assignments.soarAssignments.length; i++) {
-            sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments.soarAssignments[i], assignments.soarAssignmentDistances[i], true));
-          }
-
-          // FIXME: remove me
-//          System.out.println(" ==== sort assignments ms: " + (System.nanoTime() - startTime) / 1000000.0);
+          sortedAssignments = assignments.assignments;
 
           success = true;
         } finally {

@@ -464,7 +464,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }  
   
   @Override
-  protected Assignments calculateAndWriteCentroids(
+  protected SortedAssignments calculateAndWriteCentroids(
     FieldInfo fieldInfo,
     FloatVectorValues floatVectorValues,
     IndexOutput temporaryCentroidOutput,
@@ -475,7 +475,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     long nanoTime = System.nanoTime();
 
     if (floatVectorValues.size() == 0) {
-      return new Assignments(0, new short[0], new float[0], new short[0], new float[0]);
+      return new SortedAssignments(0, new HashSet<>());
     }
     int desiredClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
 
@@ -522,7 +522,15 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     // FIXME: remove me
 //    vectorDistribution(floatVectorValues, centroids);
 
-    return new Assignments(centroids.length, assignments, assignmentDistances, soarAssignments, soarAssignmentDistances);
+    Set<SortedAssignment> sortedAssignments = new HashSet<>();
+    for(int i = 0; i < assignments.length; i++) {
+      sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments[i], assignmentDistances[i], false));
+    }
+    for(int i = 0; i < soarAssignments.length; i++) {
+      sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), soarAssignments[i], soarAssignmentDistances[i], true));
+    }
+
+    return new SortedAssignments(centroids.length, sortedAssignments);
   }
 
   private static void vectorDistribution(FloatVectorValues vectors, float[][] centroids) throws IOException {
