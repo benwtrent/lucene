@@ -14,8 +14,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.PriorityQueue;
 
-import static java.lang.Math.fma;
-
 public final class KMeansLocal {
     private record NeighborInfo(float distanceSq, short offset) implements Comparable<NeighborInfo> {
 
@@ -28,8 +26,8 @@ public final class KMeansLocal {
   private static void computeNeighborhoods(float[][] centers,
                                            List<short[]> neighborhoods, // Modified in place
                                            int clustersPerNeighborhood) {
-
     int k = neighborhoods.size();
+
     if (k == 0 || clustersPerNeighborhood <= 0) {
       return;
     }
@@ -42,10 +40,10 @@ public final class KMeansLocal {
     UpdateNeighborsHelper updateNeighborsHelper = new UpdateNeighborsHelper(clustersPerNeighborhood);
 
     for (short i = 0; i < k; i++) {
-      for (short j = (short) (i+1); j < k; j++) {
+      for (short j = 0; j < i; j++) {
           float dsq = VectorUtil.squareDistance(centers[i], centers[j]);
-          updateNeighborsHelper.update(i, dsq, neighborQueues.get(i));
-          updateNeighborsHelper.update(j, dsq, neighborQueues.get(j));
+          updateNeighborsHelper.update(j, dsq, neighborQueues.get(i));
+          updateNeighborsHelper.update(i, dsq, neighborQueues.get(j));
       }
     }
 
@@ -63,14 +61,14 @@ public final class KMeansLocal {
   }
 
   private static class UpdateNeighborsHelper {
-    private final int maxSize;
+    private final int clustersPerNeighborhood;
 
     UpdateNeighborsHelper(int clustersPerNeighborhood) {
-      this.maxSize = clustersPerNeighborhood;
+      this.clustersPerNeighborhood = clustersPerNeighborhood;
     }
 
     void update(short neighborOffset, float distanceSq, PriorityQueue<NeighborInfo> queue) {
-      if (queue.size() < maxSize) {
+      if (queue.size() < clustersPerNeighborhood) {
         queue.offer(new NeighborInfo(distanceSq, neighborOffset));
       } else {
         NeighborInfo largestNeighbor = queue.peek();
@@ -173,7 +171,7 @@ public final class KMeansLocal {
       }
       float d1sq = assignmentDistances[i];
 
-      short bestJd = 0;
+      short bestJd = -1;
       float minSoar = Float.MAX_VALUE;
       for(short jd : neighborhoods.get(currJd)) {
         if (jd == currJd) {

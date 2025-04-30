@@ -26,11 +26,8 @@ import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
-import java.util.stream.IntStream;
 
 import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.INDEX_BITS;
 import static org.apache.lucene.sandbox.codecs.quantization.IVFVectorsFormat.IVF_VECTOR_COMPONENT;
@@ -517,9 +514,11 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     for(int i = 0; i < assignments.length; i++) {
       sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments[i], assignmentDistances[i], false));
     }
-//    for(int i = 0; i < soarAssignments.length; i++) {
-//      sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), soarAssignments[i], soarAssignmentDistances[i], true));
-//    }
+    for(int i = 0; i < soarAssignments.length; i++) {
+      if(soarAssignments[i] != -1) {
+        sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), soarAssignments[i], soarAssignmentDistances[i], true));
+      }
+    }
 
     return new SortedAssignments(centroids.length, sortedAssignments);
   }
