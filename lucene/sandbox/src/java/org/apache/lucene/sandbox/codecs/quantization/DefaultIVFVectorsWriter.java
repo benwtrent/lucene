@@ -6,25 +6,6 @@
  */
 package org.apache.lucene.sandbox.codecs.quantization;
 
-import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.INDEX_BITS;
-import static org.apache.lucene.sandbox.codecs.quantization.IVFVectorsFormat.IVF_VECTOR_COMPONENT;
-import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
-import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.discretize;
-import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.packAsBinary;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.IntStream;
-
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.hnsw.FlatVectorsWriter;
 import org.apache.lucene.index.FieldInfo;
@@ -34,7 +15,6 @@ import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.internal.hppc.IntArrayList;
 import org.apache.lucene.internal.vectorization.OSQVectorsScorer;
-import org.apache.lucene.search.Sort;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.FixedBitSet;
@@ -42,6 +22,21 @@ import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.IntStream;
+
+import static org.apache.lucene.codecs.lucene102.Lucene102BinaryQuantizedVectorsFormat.INDEX_BITS;
+import static org.apache.lucene.sandbox.codecs.quantization.IVFVectorsFormat.IVF_VECTOR_COMPONENT;
+import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
+import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.discretize;
+import static org.apache.lucene.util.quantization.OptimizedScalarQuantizer.packAsBinary;
 
 /**
  * Default implementation of {@link IVFVectorsWriter}. It uses lucene {@link KMeans} algoritm to
@@ -289,8 +284,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       this.iterationsRun = iterationsRun;
       this.converged = converged;
     }
-    public KMeansResult(float[][] centroids, short[] assignments, float[] assignmentDistances) {
-      this(centroids, assignments, IntStream.range(0, assignments.length).toArray(), assignmentDistances, null, null, 0, false);
+    public KMeansResult(float[][] centroids, short[] assignments, int[] assignmentOrdinals, float[] assignmentDistances) {
+      this(centroids, assignments, assignmentOrdinals, assignmentDistances, null, null, 0, false);
     }
     public KMeansResult() {
       this(new float[0][0], new short[0], new int[0], new float[0], new short[0], new float[0], 0, false);
@@ -299,8 +294,8 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
   public static KMeansResult kMeansHierarchical(FieldInfo fieldInfo, FloatVectorValues vectors, int desiredClusters) throws IOException {
     int maxIterations = 8;
-    int samplesPerCluster = 128;
-    short clustersPerNeighborhood = 32;
+    int samplesPerCluster = 256;
+    short clustersPerNeighborhood = MAXK;
     int depth = 0;
 
     int targetSize = (int) (vectors.size() / (float) desiredClusters);
@@ -373,7 +368,12 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       }
     }
 
-    KMeansResult kMeansResult = new KMeansResult(centroids, assignments, assignmentDistances);
+    int[] assignmentOrdinals = new int[vectors.slice.length];
+    for(int i = 0; i < assignmentOrdinals.length; i++) {
+      assignmentOrdinals[i] = vectors.slice[i];
+    }
+
+    KMeansResult kMeansResult = new KMeansResult(centroids, assignments, assignmentOrdinals, assignmentDistances);
 
     if (effectiveK == 1) {
       return kMeansResult;
@@ -397,6 +397,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
     if (depth == 0) {
       if (kMeansResult.centroids.length == 1 || kMeansResult.centroids.length >= vectors.size()) {
+        // FIXME: should just be a copy or return kMeansResult here?
         kMeansResult = new DefaultIVFVectorsWriter.KMeansResult(kMeansResult.centroids,
           kMeansResult.assignments, kMeansResult.assignmentOrds, kMeansResult.assignmentDistances,
           kMeansResult.soarAssignments, kMeansResult.soarAssignmentDistances,
@@ -430,7 +431,6 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
   }
 
   static void updateAssignmentsWithRecursiveSplit(KMeansResult current, short cluster, KMeansResult splitClusters) {
-
     int orgCentroidsSize = current.centroids.length;
 
     // update based on the outcomes from the split clusters recursion
@@ -440,7 +440,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
       System.arraycopy(current.centroids, 0, newCenters, 0, current.centroids.length);
 
       // replace the original cluster
-      short origCentroidOrd = splitClusters.assignments[0];
+      short origCentroidOrd = 0;
       newCenters[cluster] = splitClusters.centroids[0];
 
       // append the remainder
@@ -448,20 +448,20 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
 
       current.centroids = newCenters;
 
+      Set<Short> newClusterIds = new HashSet<>();
+
       for(int i = 0; i < splitClusters.assignments.length; i++) {
         // this is a new centroid that was added, and so we'll need to remap it
-        if(splitClusters.assignments[i] > origCentroidOrd) {
+        if(splitClusters.assignments[i] != origCentroidOrd) {
           int parentOrd = splitClusters.assignmentOrds[i];
+          assert current.assignments[parentOrd] == cluster;
           current.assignments[parentOrd] = (short) (splitClusters.assignments[i] + orgCentroidsSize - 1);
           current.assignmentDistances[parentOrd] = splitClusters.assignmentDistances[i];
-        } else if(splitClusters.assignments[i] < origCentroidOrd) {
-          int parentOrd = splitClusters.assignmentOrds[i];
-          current.assignments[parentOrd] = (short) (splitClusters.assignments[i] + orgCentroidsSize);
-          current.assignmentDistances[parentOrd] = splitClusters.assignmentDistances[i];
+          newClusterIds.add((short) (splitClusters.assignments[i] + orgCentroidsSize - 1));
         }
       }
     }
-  }  
+  }
   
   @Override
   protected SortedAssignments calculateAndWriteCentroids(
@@ -479,13 +479,7 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
     }
     int desiredClusters = ((floatVectorValues.size() - 1) / vectorPerCluster) + 1;
 
-    // FIXME: remove me
-//    System.out.println(" ==== desired clusters: " + desiredClusters);
-
     KMeansResult kMeansResult = kMeansHierarchical(fieldInfo, floatVectorValues, (int) (desiredClusters * 0.66f));
-
-    // FIXME: remove me
-//    System.out.println(" ==== actual clusters: " + kMeansResult.centroids.length);
 
     float[][] centroids = kMeansResult.centroids;
     short[] assignments = kMeansResult.assignments;
@@ -519,39 +513,15 @@ public class DefaultIVFVectorsWriter extends IVFVectorsWriter {
         IVF_VECTOR_COMPONENT, "final centroid count: " + centroids.length);
     }
 
-    // FIXME: remove me
-//    vectorDistribution(floatVectorValues, centroids);
-
     Set<SortedAssignment> sortedAssignments = new HashSet<>();
     for(int i = 0; i < assignments.length; i++) {
       sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), assignments[i], assignmentDistances[i], false));
     }
-    for(int i = 0; i < soarAssignments.length; i++) {
-      sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), soarAssignments[i], soarAssignmentDistances[i], true));
-    }
+//    for(int i = 0; i < soarAssignments.length; i++) {
+//      sortedAssignments.add(new SortedAssignment(floatVectorValues.ordToDoc(i), soarAssignments[i], soarAssignmentDistances[i], true));
+//    }
 
     return new SortedAssignments(centroids.length, sortedAssignments);
-  }
-
-  private static void vectorDistribution(FloatVectorValues vectors, float[][] centroids) throws IOException {
-    // verify that we don't have bad distributions
-    Map<Integer, Integer> centroidVectorCounts = new HashMap<>();
-    for(int i = 0; i < vectors.size(); i++) {
-      float smallest = Float.MAX_VALUE;
-      int centroidIdx = -1;
-      float[] vector = new float[vectors.dimension()];
-      System.arraycopy(vectors.vectorValue(i), 0, vector, 0, vectors.dimension());
-      for (int j = 0; j < centroids.length; j++) {
-        float[] centroid = centroids[j];
-        float d = VectorUtil.squareDistance(vector, centroid);
-        if(d < smallest) {
-          smallest = d;
-          centroidIdx = j;
-        }
-      }
-      centroidVectorCounts.compute(centroidIdx, (_,v) -> v == null ? 1 : v+1);
-    }
-    System.out.println(" === counts: " + centroidVectorCounts);
   }
 
   @Override

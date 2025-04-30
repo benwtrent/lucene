@@ -176,6 +176,9 @@ public final class KMeansLocal {
       short bestJd = 0;
       float minSoar = Float.MAX_VALUE;
       for(short jd : neighborhoods.get(currJd)) {
+        if (jd == currJd) {
+          continue;
+        }
         float[] cj = centers[jd];
         float soar = distanceSoar(d1, xi, cj, d1sq);
         if(soar < minSoar) {
