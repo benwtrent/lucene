@@ -288,6 +288,7 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
         for (int j = 0; j < assignmentSize; ++j) {
           assignments[i][j] = input.readVInt();
         }
+        System.out.println("Assignments: " + Arrays.toString(assignments[i]));
       }
       int nblocks = input.readVInt();
       int[] dimBlocks = new int[nblocks];

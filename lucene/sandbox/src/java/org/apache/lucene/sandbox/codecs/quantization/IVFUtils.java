@@ -18,6 +18,7 @@ import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.KnnVectorValues;
+import org.apache.lucene.internal.hppc.IntArrayList;
 import org.apache.lucene.search.KnnCollector;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
@@ -142,18 +143,23 @@ public class IVFUtils {
     Arrays.sort(moments, (a, b) -> Float.compare(b.variance(), a.variance()));
     // create a new array for the block variances
     float[] blockVariances = new float[blocks.matrix.length];
-    int[][] assignment = new int[blocks.matrix.length][];
+    IntArrayList[] assignment = new IntArrayList[blocks.matrix.length];
     for (int i = 0; i < blocks.matrix.length; ++i) {
-      assignment[i] = new int[blocks.dimBlocks[i]];
+      assignment[i] = new IntArrayList();
       int j = minElement(blockVariances);
-      assignment[j][i] = i;
+      assignment[j].add(i);
       blockVariances[j] =
-        (assignment[j].length == blocks.dimBlocks[j]
+        (assignment[j].size() == blocks.dimBlocks[j]
           ? Float.MAX_VALUE
           : // Prevent further assignments.
           blockVariances[j] + moments[i].variance());
     }
-    return assignment;
+    // convert the IntArrayList to an int[][]
+    int[][] finalAssignments = new int[assignment.length][];
+    for (int i = 0; i < assignment.length; ++i) {
+      finalAssignments[i] = assignment[i].toArray();
+    }
+    return finalAssignments;
   }
 
   static void matrixVectorMultiply(int dim, float[] m, float[] x, float[] y) {
