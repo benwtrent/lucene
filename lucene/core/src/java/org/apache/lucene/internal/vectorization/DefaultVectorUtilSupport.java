@@ -38,27 +38,32 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
 
   @Override
   public float dotProduct(float[] a, float[] b) {
+    return dotProduct(a.length, a, 0, b, 0);
+  }
+
+  @Override
+  public float dotProduct(int len, float[] a, int aOffset, float[] b, int bOffset) {
     float res = 0f;
     int i = 0;
 
     // if the array is big, unroll it
-    if (a.length > 32) {
+    if (len > 32) {
       float acc1 = 0;
       float acc2 = 0;
       float acc3 = 0;
       float acc4 = 0;
-      int upperBound = a.length & ~(4 - 1);
+      int upperBound = len & ~(4 - 1);
       for (; i < upperBound; i += 4) {
-        acc1 = fma(a[i], b[i], acc1);
-        acc2 = fma(a[i + 1], b[i + 1], acc2);
-        acc3 = fma(a[i + 2], b[i + 2], acc3);
-        acc4 = fma(a[i + 3], b[i + 3], acc4);
+        acc1 = fma(a[i + aOffset], b[i + bOffset], acc1);
+        acc2 = fma(a[i + 1 + aOffset], b[i + 1 + bOffset], acc2);
+        acc3 = fma(a[i + 2 + aOffset], b[i + 2 + bOffset], acc3);
+        acc4 = fma(a[i + 3 + aOffset], b[i + 3 + bOffset], acc4);
       }
       res += acc1 + acc2 + acc3 + acc4;
     }
 
-    for (; i < a.length; i++) {
-      res = fma(a[i], b[i], res);
+    for (; i < len; i++) {
+      res = fma(a[i + aOffset], b[i + bOffset], res);
     }
     return res;
   }

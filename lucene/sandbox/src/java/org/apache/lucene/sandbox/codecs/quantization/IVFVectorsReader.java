@@ -10,6 +10,7 @@ import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.SIMILA
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.function.IntPredicate;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.KnnVectorsReader;
@@ -35,6 +36,7 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.GroupVIntUtil;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.hnsw.NeighborQueue;
 
@@ -272,18 +274,41 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
     }
     final float[] globalCentroid = new float[info.getVectorDimension()];
     float globalCentroidDp = 0;
+    int[][] assignments = null;
+    IVFUtils.RandomOrtho randomOrtho = null;
     if (numPostingLists > 0) {
       input.readFloats(globalCentroid, 0, globalCentroid.length);
       globalCentroidDp = Float.intBitsToFloat(input.readInt());
+
+      int numAssignments = input.readVInt();
+      assignments = new int[numAssignments][];
+      for (int i = 0; i < assignments.length; i++) {
+        int assignmentSize = input.readVInt();
+        assignments[i] = new int[assignmentSize];
+        for (int j = 0; j < assignmentSize; ++j) {
+          assignments[i][j] = input.readVInt();
+        }
+      }
+      int nblocks = input.readVInt();
+      int[] dimBlocks = new int[nblocks];
+      for (int i = 0; i < nblocks; ++i) {
+        dimBlocks[i] = input.readVInt();
+      }
+      float[][] matrix = new float[nblocks][];
+      for (int i = 0; i < nblocks; ++i) {
+        matrix[i] = new float[dimBlocks[i] * dimBlocks[i]];
+        input.readFloats(matrix[i], 0, matrix[i].length);
+      }
+      randomOrtho = new IVFUtils.RandomOrtho(matrix, dimBlocks);
     }
     if (similarityFunction != info.getVectorSimilarityFunction()) {
       throw new IllegalStateException(
-          "Inconsistent vector similarity function for field=\""
-              + info.name
-              + "\"; "
-              + similarityFunction
-              + " != "
-              + info.getVectorSimilarityFunction());
+        "Inconsistent vector similarity function for field=\""
+          + info.name
+          + "\"; "
+          + similarityFunction
+          + " != "
+          + info.getVectorSimilarityFunction());
     }
     return new FieldEntry(
         similarityFunction,
@@ -292,7 +317,10 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
         centroidLength,
         postingListOffsets,
         globalCentroid,
-        globalCentroidDp);
+        globalCentroidDp,
+        assignments,
+        randomOrtho
+      );
   }
 
   private static VectorSimilarityFunction readSimilarityFunction(DataInput input)
@@ -341,11 +369,11 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   }
 
   @Override
-  public final void search(String field, float[] target, KnnCollector knnCollector, Bits acceptDocs)
+  public final void search(String field, float[] query, KnnCollector knnCollector, Bits acceptDocs)
       throws IOException {
     final FieldInfo fieldInfo = state.fieldInfos.fieldInfo(field);
     if (fieldInfo.getVectorEncoding().equals(VectorEncoding.FLOAT32) == false) {
-      rawVectorsReader.search(field, target, knnCollector, acceptDocs);
+      rawVectorsReader.search(field, query, knnCollector, acceptDocs);
       return;
     }
     int nProbe = -1;
@@ -369,6 +397,8 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
         };
 
     FieldEntry entry = fields.get(fieldInfo.number);
+    float[] target = new float[query.length];
+    IVFUtils.randomOrthogonalTransform(query, entry.randomOrtho(), entry.assignments(), target);
     IVFUtils.CentroidQueryScorer centroidQueryScorer =
         getCentroidScorer(
             fieldInfo,
@@ -446,7 +476,9 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
       long centroidLength,
       long[] postingListOffsets,
       float[] globalCentroid,
-      float globalCentroidDp) {
+      float globalCentroidDp,
+      int[][] assignments,
+      IVFUtils.RandomOrtho randomOrtho) {
     IndexInput centroidSlice(IndexInput centroidFile) throws IOException {
       return centroidFile.slice("centroids", centroidOffset, centroidLength);
     }
@@ -455,5 +487,4 @@ public abstract class IVFVectorsReader extends KnnVectorsReader {
   protected abstract IVFUtils.PostingVisitor getPostingVisitor(
       FieldInfo fieldInfo, IndexInput postingsLists, float[] target, IntPredicate needsScoring)
       throws IOException;
-
 }

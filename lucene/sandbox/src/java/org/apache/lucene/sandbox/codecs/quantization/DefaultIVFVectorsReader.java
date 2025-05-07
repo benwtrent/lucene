@@ -408,6 +408,9 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
           knnCollector.collect(doc, score);
         }
       }
+      if (scoredDocs == 0) {
+        return 0;
+      }
       knnCollector.incVisitedCount(scoredDocs);
       return scoredDocs;
     }

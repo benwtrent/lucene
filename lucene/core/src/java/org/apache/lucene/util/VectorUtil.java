@@ -70,6 +70,28 @@ public final class VectorUtil {
   }
 
   /**
+   * Returns the vector dot product of the two vectors.
+   *
+   * @throws IllegalArgumentException if the vectors' dimensions differ.
+   */
+  public static float dotProduct(int len, float[] a, int aOffset, float[] b, int bOffset) {
+    if (len < 0) {
+      throw new IllegalArgumentException("vector dimensions differ: " + len);
+    }
+    if (a.length < aOffset + len) {
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + a.length + "!=" + (aOffset + len));
+    }
+    if (b.length < bOffset + len) {
+      throw new IllegalArgumentException(
+          "vector dimensions differ: " + b.length + "!=" + (bOffset + len));
+    }
+    float r = IMPL.dotProduct(len, a, aOffset, b, bOffset);
+    assert Float.isFinite(r);
+    return r;
+  }
+
+  /**
    * Returns the cosine similarity between the two vectors.
    *
    * @throws IllegalArgumentException if the vectors' dimensions differ.

@@ -6,27 +6,27 @@
  */
 package org.apache.lucene.sandbox.codecs.quantization;
 
-import org.apache.lucene.util.VectorUtil;
-import org.apache.lucene.util.hnsw.NeighborQueue;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.PriorityQueue;
+import org.apache.lucene.util.VectorUtil;
+import org.apache.lucene.util.hnsw.NeighborQueue;
 
 public final class KMeansLocal {
-    private record NeighborInfo(float distanceSq, short offset) implements Comparable<NeighborInfo> {
+  private record NeighborInfo(float distanceSq, short offset) implements Comparable<NeighborInfo> {
 
     @Override
-      public int compareTo(NeighborInfo other) {
-        return Float.compare(other.distanceSq, this.distanceSq);
-      }
+    public int compareTo(NeighborInfo other) {
+      return Float.compare(other.distanceSq, this.distanceSq);
     }
+  }
 
-  private static void computeNeighborhoods(float[][] centers,
-                                           List<int[]> neighborhoods, // Modified in place
-                                           int clustersPerNeighborhood) {
+  private static void computeNeighborhoods(
+      float[][] centers,
+      List<int[]> neighborhoods, // Modified in place
+      int clustersPerNeighborhood) {
     int k = neighborhoods.size();
 
     if (k == 0 || clustersPerNeighborhood <= 0) {
@@ -55,42 +55,43 @@ public final class KMeansLocal {
     }
   }
 
-//  private static void computeNeighborhoods(float[][] centers,
-//                                           List<short[]> neighborhoods, // Modified in place
-//                                           int clustersPerNeighborhood) {
-//    int k = neighborhoods.size();
-//
-//    if (k == 0 || clustersPerNeighborhood <= 0) {
-//      return;
-//    }
-//
-//    List<PriorityQueue<NeighborInfo>> neighborQueues = new ArrayList<>(k);
-//    for (int i = 0; i < k; i++) {
-//      neighborQueues.add(new PriorityQueue<>());
-//    }
-//
-//    UpdateNeighborsHelper updateNeighborsHelper = new UpdateNeighborsHelper(clustersPerNeighborhood);
-//
-//    for (short i = 0; i < k; i++) {
-//      for (short j = 0; j < i; j++) {
-//          float dsq = VectorUtil.squareDistance(centers[i], centers[j]);
-//          updateNeighborsHelper.update(j, dsq, neighborQueues.get(i));
-//          updateNeighborsHelper.update(i, dsq, neighborQueues.get(j));
-//      }
-//    }
-//
-//    for (int i = 0; i < k; i++) {
-//      PriorityQueue<NeighborInfo> queue = neighborQueues.get(i);
-//      int neighborCount = queue.size();
-//      short[] neighbors = new short[neighborCount];
-//      int idx = 0;
-//      while (!queue.isEmpty()) {
-//        neighbors[idx++] = queue.poll().offset;
-//      }
-//      Arrays.sort(neighbors);
-//      neighborhoods.set(i, neighbors);
-//    }
-//  }
+  //  private static void computeNeighborhoods(float[][] centers,
+  //                                           List<short[]> neighborhoods, // Modified in place
+  //                                           int clustersPerNeighborhood) {
+  //    int k = neighborhoods.size();
+  //
+  //    if (k == 0 || clustersPerNeighborhood <= 0) {
+  //      return;
+  //    }
+  //
+  //    List<PriorityQueue<NeighborInfo>> neighborQueues = new ArrayList<>(k);
+  //    for (int i = 0; i < k; i++) {
+  //      neighborQueues.add(new PriorityQueue<>());
+  //    }
+  //
+  //    UpdateNeighborsHelper updateNeighborsHelper = new
+  // UpdateNeighborsHelper(clustersPerNeighborhood);
+  //
+  //    for (short i = 0; i < k; i++) {
+  //      for (short j = 0; j < i; j++) {
+  //          float dsq = VectorUtil.squareDistance(centers[i], centers[j]);
+  //          updateNeighborsHelper.update(j, dsq, neighborQueues.get(i));
+  //          updateNeighborsHelper.update(i, dsq, neighborQueues.get(j));
+  //      }
+  //    }
+  //
+  //    for (int i = 0; i < k; i++) {
+  //      PriorityQueue<NeighborInfo> queue = neighborQueues.get(i);
+  //      int neighborCount = queue.size();
+  //      short[] neighbors = new short[neighborCount];
+  //      int idx = 0;
+  //      while (!queue.isEmpty()) {
+  //        neighbors[idx++] = queue.poll().offset;
+  //      }
+  //      Arrays.sort(neighbors);
+  //      neighborhoods.set(i, neighbors);
+  //    }
+  //  }
 
   private static class UpdateNeighborsHelper {
     private final int clustersPerNeighborhood;
@@ -112,13 +113,15 @@ public final class KMeansLocal {
     }
   }
 
-  private static boolean stepLloyd(FloatVectorValuesSlice dataset,
-                                   List<int[]> neighborhoods,
-                                   float[][] centers,
-                                   float[][] nextCenters,
-                                   long[] centerCounts,
-                                   short[] assignments,
-                                   float[] assignmentDistances) throws IOException {
+  private static boolean stepLloyd(
+      FloatVectorValuesSlice dataset,
+      List<int[]> neighborhoods,
+      float[][] centers,
+      float[][] nextCenters,
+      long[] centerCounts,
+      short[] assignments,
+      float[] assignmentDistances)
+      throws IOException {
 
     boolean changed = false;
     int dim = centers[0].length;
@@ -126,8 +129,8 @@ public final class KMeansLocal {
     int n = assignments.length;
 
     Arrays.fill(centerCounts, 0L);
-    for(int i = 0; i < nextCenters.length; i++) {
-      for(int j = 0; j < nextCenters[0].length; j++) {
+    for (int i = 0; i < nextCenters.length; i++) {
+      for (int j = 0; j < nextCenters[0].length; j++) {
         nextCenters[i][j] = 0.0f;
       }
     }
@@ -179,9 +182,15 @@ public final class KMeansLocal {
     return changed;
   }
 
-  static void assignSpilled(FloatVectorValuesSlice vectors, List<int[]> neighborhoods,
-                            float[][] centers, short[] assignments, float[] assignmentDistances,
-                            short[] spilledAssignments, float[] spilledDistances) throws IOException {
+  static void assignSpilled(
+      FloatVectorValuesSlice vectors,
+      List<int[]> neighborhoods,
+      float[][] centers,
+      short[] assignments,
+      float[] assignmentDistances,
+      short[] spilledAssignments,
+      float[] spilledDistances)
+      throws IOException {
     // SOAR uses an adjusted distance for assigning spilled documents which is
     // given by:
     //
@@ -192,7 +201,7 @@ public final class KMeansLocal {
     // cluster with the smallest soar(x, c).
 
     float[] d1 = new float[vectors.dimension()];
-    for(int i = 0; i < vectors.size(); i++) {
+    for (int i = 0; i < vectors.size(); i++) {
       float[] xi = vectors.vectorValue(i);
 
       short currJd = assignments[i];
@@ -205,13 +214,13 @@ public final class KMeansLocal {
 
       int bestJd = -1;
       float minSoar = Float.MAX_VALUE;
-      for(int jd : neighborhoods.get(currJd)) {
+      for (int jd : neighborhoods.get(currJd)) {
         if (jd == currJd) {
           continue;
         }
         float[] cj = centers[jd];
         float soar = distanceSoar(d1, xi, cj, d1sq);
-        if(soar < minSoar) {
+        if (soar < minSoar) {
           bestJd = jd;
           minSoar = soar;
         }
@@ -230,17 +239,19 @@ public final class KMeansLocal {
     return dsq + lambda * rproj * rproj / rnorm;
   }
 
-  public static DefaultIVFVectorsWriter.KMeansResult kMeansLocal(FloatVectorValuesSlice dataset,
-                                         final float[][] centers,
-                                         final short[] assignments,
-                                         final int[] assignmentOrds,
-                                         final float[] assignmentDistances,
-                                         short clustersPerNeighborhood,
-                                         int maxIterations) throws IOException {
+  public static DefaultIVFVectorsWriter.KMeansResult kMeansLocal(
+      FloatVectorValuesSlice dataset,
+      final float[][] centers,
+      final short[] assignments,
+      final int[] assignmentOrds,
+      final float[] assignmentDistances,
+      short clustersPerNeighborhood,
+      int maxIterations)
+      throws IOException {
     int k = centers.length;
 
     List<int[]> neighborhoods = new ArrayList<>(k);
-    for(int i=0; i < k; ++i) {
+    for (int i = 0; i < k; ++i) {
       neighborhoods.add(null);
     }
 
@@ -252,7 +263,15 @@ public final class KMeansLocal {
 
     int iterationsRun;
     for (iterationsRun = 0; iterationsRun < maxIterations; iterationsRun++) {
-      boolean changed = stepLloyd(dataset, neighborhoods, centers, nextCenters, centerCounts, assignments, assignmentDistances);
+      boolean changed =
+          stepLloyd(
+              dataset,
+              neighborhoods,
+              centers,
+              nextCenters,
+              centerCounts,
+              assignments,
+              assignmentDistances);
       if (!changed) {
         converged = true;
         break;
@@ -261,11 +280,23 @@ public final class KMeansLocal {
 
     short[] spilledAssignments = new short[assignments.length];
     float[] spilledDistances = new float[assignments.length];
-    assignSpilled(dataset, neighborhoods, centers, assignments, assignmentDistances, spilledAssignments, spilledDistances);
+    assignSpilled(
+        dataset,
+        neighborhoods,
+        centers,
+        assignments,
+        assignmentDistances,
+        spilledAssignments,
+        spilledDistances);
 
-    return new DefaultIVFVectorsWriter.KMeansResult(centers,
-      assignments, assignmentOrds, assignmentDistances,
-      spilledAssignments, spilledDistances,
-      iterationsRun, converged);
+    return new DefaultIVFVectorsWriter.KMeansResult(
+        centers,
+        assignments,
+        assignmentOrds,
+        assignmentDistances,
+        spilledAssignments,
+        spilledDistances,
+        iterationsRun,
+        converged);
   }
 }

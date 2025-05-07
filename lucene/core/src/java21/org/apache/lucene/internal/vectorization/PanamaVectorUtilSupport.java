@@ -112,7 +112,7 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
     // if the array size is large (> 2x platform vector size), it's worth the overhead to vectorize
     if (a.length > 2 * FLOAT_SPECIES.length()) {
       i += FLOAT_SPECIES.loopBound(a.length);
-      res += dotProductBody(a, b, i);
+      res += dotProductBody(a, 0, b, 0, i);
     }
 
     // scalar tail
@@ -122,8 +122,26 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
     return res;
   }
 
+  @Override
+  public float dotProduct(int len, float[] a, int aOffset, float[] b, int bOffset) {
+    int i = 0;
+    float res = 0;
+
+    // if the array size is large (> 2x platform vector size), it's worth the overhead to vectorize
+    if (len >= 2 * FLOAT_SPECIES.length()) {
+      i += FLOAT_SPECIES.loopBound(len);
+      res += dotProductBody(a, aOffset, b, bOffset, i);
+    }
+
+    // scalar tail
+    for (; i < len; i++) {
+      res = fma(a[i + aOffset], b[i + bOffset], res);
+    }
+    return res;
+  }
+
   /** vectorized float dot product body */
-  private float dotProductBody(float[] a, float[] b, int limit) {
+  private float dotProductBody(float[] a, int aOffset, float[] b, int bOffset, int limit) {
     int i = 0;
     // vector loop is unrolled 4x (4 accumulators in parallel)
     // we don't know how many the cpu can do at once, some can do 2, some 4
@@ -134,29 +152,35 @@ final class PanamaVectorUtilSupport implements VectorUtilSupport {
     int unrolledLimit = limit - 3 * FLOAT_SPECIES.length();
     for (; i < unrolledLimit; i += 4 * FLOAT_SPECIES.length()) {
       // one
-      FloatVector va = FloatVector.fromArray(FLOAT_SPECIES, a, i);
-      FloatVector vb = FloatVector.fromArray(FLOAT_SPECIES, b, i);
+      FloatVector va = FloatVector.fromArray(FLOAT_SPECIES, a, i + aOffset);
+      FloatVector vb = FloatVector.fromArray(FLOAT_SPECIES, b, i + bOffset);
       acc1 = fma(va, vb, acc1);
 
       // two
-      FloatVector vc = FloatVector.fromArray(FLOAT_SPECIES, a, i + FLOAT_SPECIES.length());
-      FloatVector vd = FloatVector.fromArray(FLOAT_SPECIES, b, i + FLOAT_SPECIES.length());
+      FloatVector vc =
+          FloatVector.fromArray(FLOAT_SPECIES, a, i + FLOAT_SPECIES.length() + aOffset);
+      FloatVector vd =
+          FloatVector.fromArray(FLOAT_SPECIES, b, i + FLOAT_SPECIES.length() + bOffset);
       acc2 = fma(vc, vd, acc2);
 
       // three
-      FloatVector ve = FloatVector.fromArray(FLOAT_SPECIES, a, i + 2 * FLOAT_SPECIES.length());
-      FloatVector vf = FloatVector.fromArray(FLOAT_SPECIES, b, i + 2 * FLOAT_SPECIES.length());
+      FloatVector ve =
+          FloatVector.fromArray(FLOAT_SPECIES, a, i + 2 * FLOAT_SPECIES.length() + aOffset);
+      FloatVector vf =
+          FloatVector.fromArray(FLOAT_SPECIES, b, i + 2 * FLOAT_SPECIES.length() + bOffset);
       acc3 = fma(ve, vf, acc3);
 
       // four
-      FloatVector vg = FloatVector.fromArray(FLOAT_SPECIES, a, i + 3 * FLOAT_SPECIES.length());
-      FloatVector vh = FloatVector.fromArray(FLOAT_SPECIES, b, i + 3 * FLOAT_SPECIES.length());
+      FloatVector vg =
+          FloatVector.fromArray(FLOAT_SPECIES, a, i + 3 * FLOAT_SPECIES.length() + aOffset);
+      FloatVector vh =
+          FloatVector.fromArray(FLOAT_SPECIES, b, i + 3 * FLOAT_SPECIES.length() + bOffset);
       acc4 = fma(vg, vh, acc4);
     }
     // vector tail: less scalar computations for unaligned sizes, esp with big vector sizes
     for (; i < limit; i += FLOAT_SPECIES.length()) {
-      FloatVector va = FloatVector.fromArray(FLOAT_SPECIES, a, i);
-      FloatVector vb = FloatVector.fromArray(FLOAT_SPECIES, b, i);
+      FloatVector va = FloatVector.fromArray(FLOAT_SPECIES, a, i + aOffset);
+      FloatVector vb = FloatVector.fromArray(FLOAT_SPECIES, b, i + bOffset);
       acc1 = fma(va, vb, acc1);
     }
     // reduce

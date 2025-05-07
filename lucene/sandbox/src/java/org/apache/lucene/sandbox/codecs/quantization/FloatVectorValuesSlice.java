@@ -6,10 +6,9 @@
  */
 package org.apache.lucene.sandbox.codecs.quantization;
 
-import org.apache.lucene.index.FloatVectorValues;
-
 import java.io.IOException;
 import java.util.stream.IntStream;
+import org.apache.lucene.index.FloatVectorValues;
 
 public class FloatVectorValuesSlice extends FloatVectorValues {
 
