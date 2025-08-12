@@ -19,6 +19,7 @@ package org.apache.lucene.benchmark.jmh;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import org.apache.lucene.codecs.lucene103.ForDeltaUtil;
@@ -30,6 +31,10 @@ import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.bkd.BKDConfig;
+import org.apache.lucene.util.bkd.BKDWriter;
+import org.apache.lucene.util.bkd.DocIdsWriter;
+import org.apache.lucene.util.packed.PackedInts;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -62,8 +67,9 @@ public class PostingIndexInputBenchmark {
   private final ForUtil forUtil = new ForUtil();
   private final ForDeltaUtil forDeltaUtil = new ForDeltaUtil();
   private final int[] values = new int[ForUtil.BLOCK_SIZE];
+  private DocIdsWriter writer;
 
-  @Param({"2", "3", "4", "5", "6", "7", "8", "9", "10"})
+  @Param({"16", "21", "24"})
   public int bpv;
 
   @Setup(Level.Trial)
@@ -79,6 +85,7 @@ public class PostingIndexInputBenchmark {
     }
     in = dir.openInput("docs", IOContext.DEFAULT);
     postingIn = new PostingIndexInput(in, forUtil, forDeltaUtil);
+    writer = new DocIdsWriter(BKDConfig.DEFAULT_MAX_POINTS_IN_LEAF_NODE, BKDWriter.VERSION_CURRENT);
   }
 
   @TearDown(Level.Trial)
@@ -103,6 +110,13 @@ public class PostingIndexInputBenchmark {
   public void decodeAndPrefixSum(Blackhole bh) throws IOException {
     in.seek(3); // random unaligned offset
     postingIn.decodeAndPrefixSum(bpv, 100, values);
+    bh.consume(values);
+  }
+
+  @Benchmark
+  public void decodeDocEncoding(Blackhole bh) throws IOException {
+    in.seek(3); // random unaligned offset
+    writer.readInts(in, values.length, values, bpv);
     bh.consume(values);
   }
 }

@@ -28,7 +28,7 @@ import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.IntsRef;
 import org.apache.lucene.util.LongsRef;
 
-final class DocIdsWriter {
+public final class DocIdsWriter {
 
   private static final byte CONTINUOUS_IDS = (byte) -2;
   private static final byte BITSET_IDS = (byte) -1;
@@ -60,7 +60,7 @@ final class DocIdsWriter {
     scratchIntsRef.offset = 0;
   }
 
-  DocIdsWriter(int maxPointsInLeaf, int version) {
+  public DocIdsWriter(int maxPointsInLeaf, int version) {
     this.scratch = new int[maxPointsInLeaf];
     this.version = version;
   }
@@ -237,8 +237,40 @@ final class DocIdsWriter {
   }
 
   /** Read {@code count} integers into {@code docIDs}. */
-  void readInts(IndexInput in, int count, int[] docIDs) throws IOException {
+  public void readInts(IndexInput in, int count, int[] docIDs) throws IOException {
     final int bpv = in.readByte();
+    switch (bpv) {
+      case CONTINUOUS_IDS:
+        readContinuousIds(in, count, docIDs);
+        break;
+      case BITSET_IDS:
+        readBitSet(in, count, docIDs);
+        break;
+      case DELTA_BPV_16:
+        readDelta16(in, count, docIDs);
+        break;
+      case BPV_21:
+        readInts21(in, count, docIDs);
+        break;
+      case BPV_24:
+        if (version < BKDWriter.VERSION_VECTORIZE_BPV24_AND_INTRODUCE_BPV21) {
+          readScalarInts24(in, count, docIDs);
+        } else {
+          readInts24(in, count, docIDs);
+        }
+        break;
+      case BPV_32:
+        readInts32(in, count, docIDs);
+        break;
+      case LEGACY_DELTA_VINT:
+        readLegacyDeltaVInts(in, count, docIDs);
+        break;
+      default:
+        throw new IOException("Unsupported number of bits per value: " + bpv);
+    }
+  }
+
+  public void readInts(IndexInput in, int count, int[] docIDs, int bpv) throws IOException {
     switch (bpv) {
       case CONTINUOUS_IDS:
         readContinuousIds(in, count, docIDs);
