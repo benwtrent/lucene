@@ -28,7 +28,9 @@ import org.apache.lucene.codecs.FilterCodec;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene104.Lucene104ScalarQuantizedVectorsFormat.ScalarEncoding;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
 import org.apache.lucene.document.KnnFloatVectorField;
+import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.IndexReader;
@@ -37,6 +39,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.KnnVectorValues;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.NoMergePolicy;
+import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnFloatVectorQuery;
@@ -77,13 +80,13 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
   }
 
   public void testMergeScoreConsistency() throws IOException {
+    float[] queryVector = new float[] {-0.5f, 90f, -10f, 14.8f};
     float[][] vectors =
         new float[][] {
           new float[] {230f, 300.33f, -34.8988f, 15.555f},
           new float[] {-0.5f, 100f, -13f, 14.8f},
-          new float[] {0.5f, 111.3f, -13f, 14.8f}
+          queryVector.clone()
         };
-    float[] queryVector = new float[] {-0.5f, 90f, -10f, 14.8f};
 
     for (var similarityFunction : VectorSimilarityFunction.values()) {
       if (similarityFunction == VectorSimilarityFunction.DOT_PRODUCT) {
@@ -106,22 +109,29 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
       float[][] vectors, float[] queryVector, VectorSimilarityFunction similarityFunction)
       throws IOException {
     KnnFloatVectorField knnField = new KnnFloatVectorField("vec", vectors[0], similarityFunction);
+    StringField idField = new StringField("id", "0", Field.Store.YES);
     try (Directory dir = newDirectory()) {
+      String[] ids = new String[3];
       float[] scores = new float[3];
       try (IndexWriter w =
           new IndexWriter(dir, newIndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE))) {
+        int id = 0;
         for (float[] v : vectors) {
           Document doc = new Document();
           knnField.setVectorValue(v);
+          idField.setStringValue(Integer.toString(id++));
           doc.add(knnField);
+          doc.add(idField);
           w.addDocument(doc);
           w.flush();
         }
         try (IndexReader reader = DirectoryReader.open(w)) {
           IndexSearcher searcher = new IndexSearcher(reader);
+          StoredFields fields = reader.storedFields();
           TopDocs td = searcher.search(new KnnFloatVectorQuery("vec", queryVector, 3), 3);
           for (int i = 0; i < td.scoreDocs.length; i++) {
             scores[i] = td.scoreDocs[i].score;
+            ids[i] = fields.document(td.scoreDocs[i].doc).getField("id").stringValue();
           }
         }
       }
@@ -129,9 +139,27 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
         w.forceMerge(1);
         try (IndexReader reader = DirectoryReader.open(w)) {
           assertEquals(1, reader.leaves().size());
+          StoredFields fields = reader.storedFields();
           IndexSearcher searcher = new IndexSearcher(reader);
           TopDocs td = searcher.search(new KnnFloatVectorQuery("vec", queryVector, 3), 3);
           for (int i = 0; i < td.scoreDocs.length; i++) {
+            String docId = fields.document(td.scoreDocs[i].doc).getField("id").stringValue();
+            assertEquals(
+                "encoding: "
+                    + encoding
+                    + " space: "
+                    + similarityFunction
+                    + " expected: ["
+                    + ids[i]
+                    + "]["
+                    + scores[i]
+                    + "] actual ["
+                    + docId
+                    + "]["
+                    + td.scoreDocs[i].score
+                    + "]",
+                ids[i],
+                docId);
             float tolerance =
                 Math.max(absTolerance, absTolerance * Math.max(scores[i], td.scoreDocs[i].score));
             float absDiff = Math.abs(scores[i] - td.scoreDocs[i].score);
