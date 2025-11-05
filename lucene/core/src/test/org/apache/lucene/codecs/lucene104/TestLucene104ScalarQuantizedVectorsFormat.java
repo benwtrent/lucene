@@ -18,14 +18,10 @@ package org.apache.lucene.codecs.lucene104;
 
 import static java.lang.String.format;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
-import static org.hamcrest.Matchers.closeTo;
-import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.oneOf;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.FilterCodec;
@@ -50,6 +46,7 @@ import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.tests.index.BaseKnnVectorsFormatTestCase;
 import org.apache.lucene.tests.util.TestUtil;
+import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.quantization.OptimizedScalarQuantizer;
 import org.junit.Before;
 
@@ -57,13 +54,19 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
 
   private ScalarEncoding encoding;
   private KnnVectorsFormat format;
+  private float absTolerance;
 
   @Before
   @Override
   public void setUp() throws Exception {
     var encodingValues = ScalarEncoding.values();
-    encoding =
-        ScalarEncoding.PACKED_NIBBLE; // encodingValues[random().nextInt(encodingValues.length)];
+    encoding = encodingValues[random().nextInt(encodingValues.length)];
+    absTolerance =
+        switch (encoding) {
+          case UNSIGNED_BYTE, SEVEN_BIT -> 0.001f;
+          case PACKED_NIBBLE -> 0.003f;
+          case SINGLE_BIT_QUERY_NIBBLE -> 0.015f;
+        };
     format = new Lucene104ScalarQuantizedVectorsFormat(encoding);
     super.setUp();
   }
@@ -73,18 +76,38 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
     return TestUtil.alwaysKnnVectorsFormat(format);
   }
 
-  public void testMerge() throws IOException {
+  public void testMergeScoreConsistency() throws IOException {
     float[][] vectors =
         new float[][] {
           new float[] {230f, 300.33f, -34.8988f, 15.555f},
           new float[] {-0.5f, 100f, -13f, 14.8f},
           new float[] {0.5f, 111.3f, -13f, 14.8f}
         };
+    float[] queryVector = new float[] {-0.5f, 90f, -10f, 14.8f};
 
-    KnnFloatVectorField knnField =
-        new KnnFloatVectorField("vec", vectors[0], VectorSimilarityFunction.EUCLIDEAN);
+    for (var similarityFunction : VectorSimilarityFunction.values()) {
+      if (similarityFunction == VectorSimilarityFunction.DOT_PRODUCT) {
+        // normalize vectors for dot product
+        float[][] normalizedVectors = new float[vectors.length][];
+        for (int i = 0; i < vectors.length; i++) {
+          normalizedVectors[i] = vectors[i].clone();
+          VectorUtil.l2normalize(normalizedVectors[i]);
+        }
+        float[] normalizedQueryVector = queryVector.clone();
+        VectorUtil.l2normalize(normalizedQueryVector);
+        assertMergeScoreConsistency(normalizedVectors, normalizedQueryVector, similarityFunction);
+      } else {
+        assertMergeScoreConsistency(vectors, queryVector, similarityFunction);
+      }
+    }
+  }
+
+  private void assertMergeScoreConsistency(
+      float[][] vectors, float[] queryVector, VectorSimilarityFunction similarityFunction)
+      throws IOException {
+    KnnFloatVectorField knnField = new KnnFloatVectorField("vec", vectors[0], similarityFunction);
     try (Directory dir = newDirectory()) {
-      List<Double> scores = new ArrayList<>();
+      float[] scores = new float[3];
       try (IndexWriter w =
           new IndexWriter(dir, newIndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE))) {
         for (float[] v : vectors) {
@@ -96,11 +119,9 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
         }
         try (IndexReader reader = DirectoryReader.open(w)) {
           IndexSearcher searcher = new IndexSearcher(reader);
-          TopDocs td =
-              searcher.search(
-                  new KnnFloatVectorQuery("vec", new float[] {-0.5f, 90f, -10f, 14.8f}, 3), 3);
-          for (var doc : td.scoreDocs) {
-            scores.add((double) doc.score);
+          TopDocs td = searcher.search(new KnnFloatVectorQuery("vec", queryVector, 3), 3);
+          for (int i = 0; i < td.scoreDocs.length; i++) {
+            scores[i] = td.scoreDocs[i].score;
           }
         }
       }
@@ -109,11 +130,25 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
         try (IndexReader reader = DirectoryReader.open(w)) {
           assertEquals(1, reader.leaves().size());
           IndexSearcher searcher = new IndexSearcher(reader);
-          TopDocs td =
-              searcher.search(
-                  new KnnFloatVectorQuery("vec", new float[] {-0.5f, 90f, -10f, 14.8f}, 3), 3);
-          for (var doc : td.scoreDocs) {
-            assertThat(scores, hasItem(closeTo(doc.score, 0.002)));
+          TopDocs td = searcher.search(new KnnFloatVectorQuery("vec", queryVector, 3), 3);
+          for (int i = 0; i < td.scoreDocs.length; i++) {
+            float tolerance =
+                Math.max(absTolerance, absTolerance * Math.max(scores[i], td.scoreDocs[i].score));
+            float absDiff = Math.abs(scores[i] - td.scoreDocs[i].score);
+            assertTrue(
+                "encoding: "
+                    + encoding
+                    + " space: "
+                    + similarityFunction
+                    + " expected score: "
+                    + scores[i]
+                    + " within "
+                    + tolerance
+                    + " but got: "
+                    + td.scoreDocs[i].score
+                    + " absDiff: "
+                    + absDiff,
+                absDiff <= tolerance);
           }
         }
       }
