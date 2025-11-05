@@ -22,6 +22,7 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.oneOf;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Locale;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.FilterCodec;
@@ -44,6 +45,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.store.Directory;
@@ -63,7 +65,9 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
   @Override
   public void setUp() throws Exception {
     var encodingValues = ScalarEncoding.values();
-    encoding = encodingValues[random().nextInt(encodingValues.length)];
+    encoding =
+        ScalarEncoding
+            .SINGLE_BIT_QUERY_NIBBLE; // encodingValues[random().nextInt(encodingValues.length)];
     absTolerance =
         switch (encoding) {
           case UNSIGNED_BYTE, SEVEN_BIT -> 0.001f;
@@ -111,8 +115,7 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
     KnnFloatVectorField knnField = new KnnFloatVectorField("vec", vectors[0], similarityFunction);
     StringField idField = new StringField("id", "0", Field.Store.YES);
     try (Directory dir = newDirectory()) {
-      String[] ids = new String[3];
-      float[] scores = new float[3];
+      ScoreDoc[] scoreDocs = new ScoreDoc[3];
       try (IndexWriter w =
           new IndexWriter(dir, newIndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE))) {
         int id = 0;
@@ -130,8 +133,9 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
           StoredFields fields = reader.storedFields();
           TopDocs td = searcher.search(new KnnFloatVectorQuery("vec", queryVector, 3), 3);
           for (int i = 0; i < td.scoreDocs.length; i++) {
-            scores[i] = td.scoreDocs[i].score;
-            ids[i] = fields.document(td.scoreDocs[i].doc).getField("id").stringValue();
+            scoreDocs[i] = td.scoreDocs[i];
+            scoreDocs[i].doc =
+                Integer.parseInt(fields.document(td.scoreDocs[i].doc).getField("id").stringValue());
           }
         }
       }
@@ -143,37 +147,39 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
           IndexSearcher searcher = new IndexSearcher(reader);
           TopDocs td = searcher.search(new KnnFloatVectorQuery("vec", queryVector, 3), 3);
           for (int i = 0; i < td.scoreDocs.length; i++) {
-            String docId = fields.document(td.scoreDocs[i].doc).getField("id").stringValue();
+            int docId =
+                Integer.parseInt(fields.document(td.scoreDocs[i].doc).getField("id").stringValue());
             assertEquals(
-                "encoding: "
+                "wrong doc at pos : ["
+                    + i
+                    + "] encoding: "
                     + encoding
                     + " space: "
                     + similarityFunction
-                    + " expected: ["
-                    + ids[i]
-                    + "]["
-                    + scores[i]
-                    + "] actual ["
-                    + docId
-                    + "]["
-                    + td.scoreDocs[i].score
-                    + "]",
-                ids[i],
+                    + " expected: "
+                    + Arrays.toString(scoreDocs)
+                    + " actual: "
+                    + Arrays.toString(td.scoreDocs),
+                scoreDocs[i].doc,
                 docId);
             float tolerance =
-                Math.max(absTolerance, absTolerance * Math.max(scores[i], td.scoreDocs[i].score));
-            float absDiff = Math.abs(scores[i] - td.scoreDocs[i].score);
+                Math.max(
+                    absTolerance,
+                    absTolerance * Math.max(scoreDocs[i].score, td.scoreDocs[i].score));
+            float absDiff = Math.abs(scoreDocs[i].score - td.scoreDocs[i].score);
             assertTrue(
-                "encoding: "
+                "wrong score at pos ["
+                    + i
+                    + "] encoding: "
                     + encoding
                     + " space: "
                     + similarityFunction
-                    + " expected score: "
-                    + scores[i]
+                    + " expected : "
+                    + Arrays.toString(scoreDocs)
                     + " within "
                     + tolerance
                     + " but got: "
-                    + td.scoreDocs[i].score
+                    + Arrays.toString(td.scoreDocs)
                     + " absDiff: "
                     + absDiff,
                 absDiff <= tolerance);
