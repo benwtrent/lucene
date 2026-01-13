@@ -145,7 +145,15 @@ public class Lucene104ScalarQuantizedVectorsFormat extends FlatVectorsFormat {
      * between the compression of {@link #SINGLE_BIT_QUERY_NIBBLE} and the accuracy of {@link
      * #PACKED_NIBBLE}.
      */
-    DIBIT_QUERY_NIBBLE(4, (byte) 2, 2, (byte) 4, 4);
+    DIBIT_QUERY_NIBBLE(4, (byte) 2, 2, (byte) 4, 4),
+    /**
+     * Each dimension is quantized to 2 bits (dibit) and packed into bytes. During query time, the
+     * query vector is quantized to 8 bits per dimension (unsigned byte).
+     *
+     * <p>This encoding produces an index 4x smaller than {@link #UNSIGNED_BYTE}, while using higher
+     * precision query quantization than {@link #DIBIT_QUERY_NIBBLE}.
+     */
+    DIBIT_QUERY_BYTE(5, (byte) 2, 2, (byte) 8, 8);
 
     public static ScalarEncoding fromNumBits(int bits) {
       for (ScalarEncoding encoding : values()) {

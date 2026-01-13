@@ -311,6 +311,56 @@ final class DefaultVectorUtilSupport implements VectorUtilSupport {
     return ret0 + (ret1 << 1);
   }
 
+  @Override
+  public long int8DibitDotProduct(byte[] byteQuantized, byte[] dibitQuantized) {
+    return int8DibitDotProductImpl(byteQuantized, dibitQuantized);
+  }
+
+  /**
+   * Computes the dot product between a transposed 8-bit query vector (8 stripes) and a transposed
+   * 2-bit document vector (2 stripes). Similar to int4DibitDotProduct but with 8 query stripes
+   * instead of 4.
+   *
+   * @param q transposed 8-bit query vector (8 stripes, each of size q.length/8)
+   * @param d transposed 2-bit document vector (2 stripes, each of size d.length/2)
+   * @return the dot product
+   */
+  public static long int8DibitDotProductImpl(byte[] q, byte[] d) {
+    assert q.length == d.length * 4; // 8 query stripes vs 2 doc stripes = 4x
+    int stripeSize = d.length / 2;
+    long ret0 = int8BitDotProductImpl(q, d, 0, stripeSize);
+    long ret1 = int8BitDotProductImpl(q, d, stripeSize, stripeSize);
+    return ret0 + (ret1 << 1);
+  }
+
+  /**
+   * Helper method to compute int8-bit dot product with a specific stripe of the document vector.
+   *
+   * @param q transposed 8-bit query vector (8 stripes)
+   * @param d transposed document vector
+   * @param dOffset offset into d for the stripe to use
+   * @param stripeSize size of each stripe
+   * @return the dot product for this stripe
+   */
+  private static long int8BitDotProductImpl(byte[] q, byte[] d, int dOffset, int stripeSize) {
+    long ret = 0;
+    for (int i = 0; i < 8; i++) { // 8 stripes in query (8-bit)
+      int r = 0;
+      long subRet = 0;
+      for (final int upperBound = stripeSize & -Integer.BYTES; r < upperBound; r += Integer.BYTES) {
+        subRet +=
+            Integer.bitCount(
+                (int) BitUtil.VH_NATIVE_INT.get(q, i * stripeSize + r)
+                    & (int) BitUtil.VH_NATIVE_INT.get(d, dOffset + r));
+      }
+      for (; r < stripeSize; r++) {
+        subRet += Integer.bitCount((q[i * stripeSize + r] & d[dOffset + r]) & 0xFF);
+      }
+      ret += subRet << i;
+    }
+    return ret;
+  }
+
   /**
    * Helper method to compute int4-bit dot product with a specific stripe of the document vector.
    *

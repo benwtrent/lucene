@@ -402,6 +402,44 @@ public class OptimizedScalarQuantizer {
   }
 
   /**
+   * Transpose an 8-bit (byte) quantized query vector into a byte array for efficient bitwise
+   * operations with the index dibit vectors. The result has 8 stripes: similar to {@link
+   * #transposeHalfByte}, but for 8 bits. This allows for direct bitwise comparisons with the stored
+   * index vectors through summing the bitwise results with the relative required bit shifts.
+   *
+   * @param q the 8-bit quantized vector (values 0-255, stored as unsigned in signed bytes)
+   * @param quantQueryByte the byte array to store the transposed vector (8 stripes)
+   */
+  public static void transposeByte(byte[] q, byte[] quantQueryByte) {
+    int stripeSize = quantQueryByte.length / 8;
+    for (int i = 0; i < q.length; ) {
+      int stripe0 = 0, stripe1 = 0, stripe2 = 0, stripe3 = 0;
+      int stripe4 = 0, stripe5 = 0, stripe6 = 0, stripe7 = 0;
+      for (int j = 7; j >= 0 && i < q.length; j--) {
+        int val = Byte.toUnsignedInt(q[i]); // Treat as unsigned
+        stripe0 |= (val & 1) << j;
+        stripe1 |= ((val >> 1) & 1) << j;
+        stripe2 |= ((val >> 2) & 1) << j;
+        stripe3 |= ((val >> 3) & 1) << j;
+        stripe4 |= ((val >> 4) & 1) << j;
+        stripe5 |= ((val >> 5) & 1) << j;
+        stripe6 |= ((val >> 6) & 1) << j;
+        stripe7 |= ((val >> 7) & 1) << j;
+        i++;
+      }
+      int index = ((i + 7) / 8) - 1;
+      quantQueryByte[index] = (byte) stripe0;
+      quantQueryByte[index + stripeSize] = (byte) stripe1;
+      quantQueryByte[index + 2 * stripeSize] = (byte) stripe2;
+      quantQueryByte[index + 3 * stripeSize] = (byte) stripe3;
+      quantQueryByte[index + 4 * stripeSize] = (byte) stripe4;
+      quantQueryByte[index + 5 * stripeSize] = (byte) stripe5;
+      quantQueryByte[index + 6 * stripeSize] = (byte) stripe6;
+      quantQueryByte[index + 7 * stripeSize] = (byte) stripe7;
+    }
+  }
+
+  /**
    * Pack the vector as a binary array.
    *
    * @param vector the vector to pack

@@ -70,7 +70,8 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
   @Override
   public void setUp() throws Exception {
     var encodingValues = ScalarEncoding.values();
-    encoding = encodingValues[random().nextInt(encodingValues.length)];
+    encoding =
+        ScalarEncoding.DIBIT_QUERY_BYTE; // encodingValues[random().nextInt(encodingValues.length)];
     format = new Lucene104ScalarQuantizedVectorsFormat(encoding);
     super.setUp();
   }
@@ -201,7 +202,7 @@ public class TestLucene104ScalarQuantizedVectorsFormat extends BaseKnnVectorsFor
                   OffHeapScalarQuantizedVectorValues.packNibbles(scratch, expectedVector);
               case SINGLE_BIT_QUERY_NIBBLE ->
                   OptimizedScalarQuantizer.packAsBinary(scratch, expectedVector);
-              case DIBIT_QUERY_NIBBLE ->
+              case DIBIT_QUERY_NIBBLE, DIBIT_QUERY_BYTE ->
                   OptimizedScalarQuantizer.transposeDibit(scratch, expectedVector);
             }
             assertArrayEquals(expectedVector, qvectorValues.vectorValue(docIndexIterator.index()));

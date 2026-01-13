@@ -108,6 +108,20 @@ public interface VectorUtilSupport {
   long int4DibitDotProduct(byte[] int4Quantized, byte[] dibitQuantized);
 
   /**
+   * Compute the dot product between a quantized 8-bit (byte) vector and a dibit (2-bit) quantized
+   * vector. It is assumed that the byte quantized bits are packed in the byte array in the same way
+   * as the {@link
+   * org.apache.lucene.util.quantization.OptimizedScalarQuantizer#transposeByte(byte[], byte[])} and
+   * that the dibit bits are packed the same way as {@link
+   * org.apache.lucene.util.quantization.OptimizedScalarQuantizer#transposeDibit(byte[], byte[])}.
+   *
+   * @param byteQuantized byte (8-bit) packed quantized vector (8 stripes)
+   * @param dibitQuantized dibit packed quantized vector (2 stripes)
+   * @return the dot product
+   */
+  long int8DibitDotProduct(byte[] byteQuantized, byte[] dibitQuantized);
+
+  /**
    * Quantizes {@code vector}, putting the result into {@code dest}.
    *
    * @param vector the vector to quantize

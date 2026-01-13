@@ -82,6 +82,10 @@ public class Lucene104ScalarQuantizedVectorScorer implements FlatVectorsScorer {
           || scalarEncoding
               == Lucene104ScalarQuantizedVectorsFormat.ScalarEncoding.DIBIT_QUERY_NIBBLE) {
         OptimizedScalarQuantizer.transposeHalfByte(scratch, targetQuantized);
+      } else if (scalarEncoding
+          == Lucene104ScalarQuantizedVectorsFormat.ScalarEncoding.DIBIT_QUERY_BYTE) {
+        // for 8-bit query quantization, transpose into 8 stripes
+        OptimizedScalarQuantizer.transposeByte(scratch, targetQuantized);
       }
       return new RandomVectorScorer.AbstractRandomVectorScorer(qv) {
         @Override
@@ -201,7 +205,7 @@ public class Lucene104ScalarQuantizedVectorScorer implements FlatVectorsScorer {
               }
               OffHeapScalarQuantizedVectorValues.unpackNibbles(rawTargetVector, targetVector);
             }
-            case SINGLE_BIT_QUERY_NIBBLE, DIBIT_QUERY_NIBBLE -> {
+            case SINGLE_BIT_QUERY_NIBBLE, DIBIT_QUERY_NIBBLE, DIBIT_QUERY_BYTE -> {
               throw new IllegalStateException(
                   values.getScalarEncoding().name()
                       + " encoding is not supported for symmetric quantization");
@@ -247,6 +251,7 @@ public class Lucene104ScalarQuantizedVectorScorer implements FlatVectorsScorer {
           case SINGLE_BIT_QUERY_NIBBLE ->
               VectorUtil.int4BitDotProduct(quantizedQuery, quantizedDoc);
           case DIBIT_QUERY_NIBBLE -> VectorUtil.int4DibitDotProduct(quantizedQuery, quantizedDoc);
+          case DIBIT_QUERY_BYTE -> VectorUtil.int8DibitDotProduct(quantizedQuery, quantizedDoc);
         };
     OptimizedScalarQuantizer.QuantizationResult indexCorrections =
         targetVectors.getCorrectiveTerms(targetOrd);
